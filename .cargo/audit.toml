@@ -1,0 +1,5 @@
+# cargo-audit ignores are advisory-wide, so CI separately verifies that the
+# affected quick-xml version remains confined to the documented plist/Tauri
+# path. See docs/security/advisory-exceptions.md.
+[advisories]
+ignore = ["RUSTSEC-2026-0194", "RUSTSEC-2026-0195"]

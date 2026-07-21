@@ -1,0 +1,208 @@
+name: Supply-chain audit
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Cache Cargo registry metadata
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+          key: supply-chain-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            supply-chain-registry-${{ runner.os }}-
+
+      - name: Create report directory
+        run: mkdir -p reports
+
+      - name: Install audit tools
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+          fallback: none
+
+      - name: Verify the quick-xml exception inventory and path
+        id: quick_xml_path
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo metadata --locked --all-features --format-version 1 \
+            > reports/cargo-metadata.json
+          metadata_status=$?
+          if (( metadata_status == 0 )); then
+            node -e '
+              const fs = require("fs");
+              const metadata = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              const versions = [...new Set(metadata.packages
+                .filter((pkg) => pkg.name === "quick-xml")
+                .map((pkg) => pkg.version))].sort();
+              process.stdout.write(versions.join("\n") + "\n");
+            ' reports/cargo-metadata.json > reports/quick-xml-inventory.txt
+            inventory_status=$?
+          else
+            inventory_status=1
+            : > reports/quick-xml-inventory.txt
+          fi
+
+          cargo tree --locked --workspace --all-features \
+            --target all \
+            -i quick-xml@0.39.4 --depth 1 --prefix none \
+            > reports/quick-xml-0.39.4-inverse-tree.txt
+          quick_xml_status=$?
+          cargo tree --locked --workspace --all-features \
+            --target all \
+            -i plist --depth 1 --prefix none \
+            > reports/plist-inverse-tree.txt
+          plist_status=$?
+
+          status=0
+          expected_inventory=$'0.39.4\n0.41.0'
+          observed_inventory="$(cat reports/quick-xml-inventory.txt)"
+          observed_inventory_csv="$(paste -sd, reports/quick-xml-inventory.txt)"
+          quick_xml_lines="$(wc -l < reports/quick-xml-0.39.4-inverse-tree.txt | tr -d ' ')"
+          quick_xml_root="$(head -n 1 reports/quick-xml-0.39.4-inverse-tree.txt)"
+          quick_xml_parent="$(tail -n +2 reports/quick-xml-0.39.4-inverse-tree.txt | head -n 1)"
+          plist_lines="$(wc -l < reports/plist-inverse-tree.txt | tr -d ' ')"
+          plist_root="$(head -n 1 reports/plist-inverse-tree.txt)"
+          expiry="2026-10-21"
+          checked_on="$(date -u +%Y-%m-%d)"
+
+          if [[ "$checked_on" == "$expiry" || "$checked_on" > "$expiry" ]]; then
+            echo "The quick-xml RustSec exception expired on $expiry" >&2
+            status=1
+          fi
+
+          if (( metadata_status != 0 || inventory_status != 0 )); then
+            echo "failed to enumerate locked quick-xml versions" >&2
+            status=1
+          elif [[ "$observed_inventory" != "$expected_inventory" ]]; then
+            echo "locked quick-xml inventory changed; review the advisory exception" >&2
+            printf 'expected:\n%s\nobserved:\n%s\n' \
+              "$expected_inventory" "$observed_inventory" >&2
+            status=1
+          fi
+
+          if (( quick_xml_status != 0 || quick_xml_lines != 2 )); then
+            echo "quick-xml 0.39.4 must have exactly one direct dependent" >&2
+            status=1
+          elif [[ "$quick_xml_root" != "quick-xml v0.39.4" || "$quick_xml_parent" != plist\ v* ]]; then
+            echo "quick-xml 0.39.4 is no longer confined to plist" >&2
+            status=1
+          fi
+
+          if (( plist_status != 0 || plist_lines < 2 )); then
+            echo "plist must remain reachable only through the documented Tauri path" >&2
+            status=1
+          elif [[ "$plist_root" != plist\ v* ]] || \
+            tail -n +2 reports/plist-inverse-tree.txt | rg -qv '^tauri(?: |-)' ; then
+            echo "plist has a non-Tauri direct dependent" >&2
+            status=1
+          fi
+
+          printf \
+            '{"check":"quick-xml-exception-inventory-and-path","ignored_advisories":["RUSTSEC-2026-0194","RUSTSEC-2026-0195"],"expected_versions":["0.39.4","0.41.0"],"observed_versions_csv":"%s","checked_on":"%s","expires_on":"%s","exit_code":%d}\n' \
+            "$observed_inventory_csv" "$checked_on" "$expiry" "$status" \
+            > reports/quick-xml-exception-status.json
+          exit "$status"
+
+      - name: Run RustSec audit
+        id: rustsec
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo audit --json > reports/cargo-audit.json
+          status=$?
+          printf '{"tool":"cargo-audit","version":"0.22.2","exit_code":%d}\n' "$status" \
+            > reports/cargo-audit-status.json
+          exit "$status"
+
+      - name: Check dependency licenses, sources, and bans
+        id: cargo_deny
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo deny --locked --format json check bans licenses sources \
+            > reports/cargo-deny.jsonl 2>&1
+          status=$?
+          printf '{"tool":"cargo-deny","version":"0.20.2","exit_code":%d}\n' "$status" \
+            > reports/cargo-deny-status.json
+          exit "$status"
+
+      - name: Validate npm lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit all npm dependencies
+        id: npm_audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          npm audit --package-lock-only --json > reports/npm-audit.json
+          status=$?
+          printf '{"tool":"npm-audit","scope":"all","exit_code":%d}\n' "$status" \
+            > reports/npm-audit-status.json
+          exit "$status"
+
+      - name: Audit production npm dependencies
+        id: npm_audit_production
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          npm audit --package-lock-only --omit=dev --json \
+            > reports/npm-audit-production.json
+          status=$?
+          printf '{"tool":"npm-audit","scope":"production","exit_code":%d}\n' "$status" \
+            > reports/npm-audit-production-status.json
+          exit "$status"
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supply-chain-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce audit results
+        if: always()
+        shell: bash
+        env:
+          QUICK_XML_PATH: ${{ steps.quick_xml_path.outcome }}
+          RUSTSEC: ${{ steps.rustsec.outcome }}
+          CARGO_DENY: ${{ steps.cargo_deny.outcome }}
+          NPM_AUDIT: ${{ steps.npm_audit.outcome }}
+          NPM_AUDIT_PRODUCTION: ${{ steps.npm_audit_production.outcome }}
+        run: |
+          if [[ "$QUICK_XML_PATH" != success || "$RUSTSEC" != success || \
+            "$CARGO_DENY" != success || "$NPM_AUDIT" != success || \
+            "$NPM_AUDIT_PRODUCTION" != success ]]; then
+            echo "One or more supply-chain checks failed; inspect the uploaded reports." >&2
+            exit 1
+          fi
