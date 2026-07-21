@@ -89,6 +89,57 @@ rqbit --socks-url socks5://[username:password]@host:port ...
 rqbit server start --watch-folder [path] /download/path
 ```
 
+## AI operator (experimental)
+
+rqbit can run an optional in-process "AI operator": a supervisory loop that
+periodically reads session state, asks an LLM what a vigilant human operator
+would do, and (in later versions) applies a gated set of safe, reversible
+actions to improve Performance, Security and Reliability. It never participates
+in the data plane (piece selection, choke/unchoke, and rate limiting stay
+deterministic).
+
+It is compiled out unless you build with the `operator` feature:
+
+```
+cargo build --release --features "webui,operator"
+```
+
+Then enable it at runtime (it is **off** and **dry-run** by default):
+
+```
+rqbit server start \
+  --operator-enabled \
+  --operator-base-url http://localhost:8080 \
+  --operator-model gpt-5.6-luna \
+  /download/path
+```
+
+Flags (all also settable via `RQBIT_OPERATOR_*` env vars):
+
+- `--operator-enabled` — master on/off switch (off by default).
+- `--operator-live` — allow the operator to actually apply actions. Without it
+  the operator runs in **dry-run** mode: it logs what it would do but changes
+  nothing. Destructive actions (delete/forget) can never be applied
+  automatically regardless of this flag.
+- `--operator-base-url` — any OpenAI-compatible `/v1/chat/completions` endpoint.
+  If unset, the operator runs with a no-op model and makes no suggestions.
+- `--operator-model` — the model id, e.g. `gpt-5.6-luna`.
+- `--operator-poll-interval-secs` — how often to run (default 45s).
+- `RQBIT_OPERATOR_API_KEY` — bearer token for the endpoint (env only, not a flag).
+
+Safety model:
+
+- In **dry-run** (the default) the operator only logs what it would do.
+- With `--operator-live` it executes only **reversible, low-risk** actions
+  automatically (pause/resume a torrent, adjust global rate limits), capped at a
+  few per cycle.
+- **Destructive actions (delete/forget) are never executed automatically** — they
+  require explicit human confirmation regardless of `--operator-live`. The risk
+  tier of every action is decided by rqbit, not by the model, so a
+  misbehaving/hostile model cannot escalate a delete into an automatic action.
+- Untrusted torrent/peer text is passed to the model strictly as data, never as
+  instructions.
+
 ## Systemd socket activation
 
 rqbit can be started on-demand via [systemd socket activation](https://0pointer.de/blog/projects/socket-activation.html) by installing the [service and socket systemd units](systemd) into `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user`) and customizing them to your needs. If the associated [`rqbit.conf`](systemd/rqbit.conf) file is installed in `$XDG_CONFIG_HOME/rqbit/rqbit.conf` (`~/.config/rqbit/rqbit.conf`), it will be used to configure `rqbit` when started via the provided systemd unit.

@@ -122,6 +122,37 @@ struct Opts {
     #[arg(long = "enable-mdns", env = "RQBIT_MDNS_ENABLE")]
     enable_mdns: bool,
 
+    /// Enable the in-process AI operator (experimental; requires building with
+    /// --features operator). Off by default.
+    #[cfg(feature = "operator")]
+    #[arg(long = "operator-enabled", env = "RQBIT_OPERATOR_ENABLE")]
+    operator_enabled: bool,
+
+    /// Allow the operator to actually apply actions. Without this it runs in
+    /// dry-run mode and only logs what it would do.
+    #[cfg(feature = "operator")]
+    #[arg(long = "operator-live", env = "RQBIT_OPERATOR_LIVE")]
+    operator_live: bool,
+
+    /// OpenAI-compatible base URL for the operator model endpoint.
+    #[cfg(feature = "operator")]
+    #[arg(long = "operator-base-url", env = "RQBIT_OPERATOR_BASE_URL")]
+    operator_base_url: Option<String>,
+
+    /// Operator model identifier, e.g. gpt-5.6-luna.
+    #[cfg(feature = "operator")]
+    #[arg(long = "operator-model", env = "RQBIT_OPERATOR_MODEL")]
+    operator_model: Option<String>,
+
+    /// Operator poll interval, in seconds.
+    #[cfg(feature = "operator")]
+    #[arg(
+        long = "operator-poll-interval-secs",
+        env = "RQBIT_OPERATOR_POLL_INTERVAL_SECS",
+        default_value_t = 45
+    )]
+    operator_poll_interval_secs: u64,
+
     /// Set this flag if you want to use tokio's single threaded runtime.
     /// It MAY perform better, but the main purpose is easier debugging, as time
     /// profilers work better with this one.
@@ -695,6 +726,23 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
         runtime_worker_threads: Some(opts.max_blocking_threads as usize),
         ipv4_only: opts.ipv4_only,
         client_name_and_version: None,
+        #[cfg(feature = "operator")]
+        operator: if opts.operator_enabled {
+            Some(librqbit::operator::OperatorOptions {
+                enabled: true,
+                dry_run: !opts.operator_live,
+                interval: std::time::Duration::from_secs(opts.operator_poll_interval_secs),
+                model: librqbit::operator::ModelConfig {
+                    base_url: opts.operator_base_url.clone().unwrap_or_default(),
+                    model: opts.operator_model.clone().unwrap_or_default(),
+                    api_key: std::env::var("RQBIT_OPERATOR_API_KEY").ok(),
+                    request_timeout: std::time::Duration::from_secs(30),
+                },
+                max_auto_actions_per_tick: 2,
+            })
+        } else {
+            None
+        },
     };
 
     #[allow(clippy::needless_update)]

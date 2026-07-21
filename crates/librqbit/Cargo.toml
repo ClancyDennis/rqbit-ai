@@ -35,6 +35,9 @@ postgres = ["sqlx", "home"]
 async-bt = ["async-backtrace"]
 watch = ["notify"]
 disable-upload = []
+# In-process AI operator (optional supervisory loop). No extra deps: reuses
+# reqwest/serde_json/async-trait which are already non-optional.
+operator = []
 
 # These are absolutely useless for people, just for debugging / testing / benchmarking
 _disable_disk_write_net_benchmark = []

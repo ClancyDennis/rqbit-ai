@@ -532,6 +532,11 @@ pub struct SessionOptions {
     /// Override the client name and version used in User-Agent headers and
     /// peer extended handshakes. Defaults to "rqbit X.Y.Z".
     pub client_name_and_version: Option<String>,
+
+    /// Optional in-process AI operator configuration. `None` (the default)
+    /// disables it entirely. Only present with the `operator` feature.
+    #[cfg(feature = "operator")]
+    pub operator: Option<crate::operator::OperatorOptions>,
 }
 
 impl Default for SessionOptions {
@@ -560,6 +565,8 @@ impl Default for SessionOptions {
             disable_local_service_discovery: false,
             ipv4_only: false,
             client_name_and_version: None,
+            #[cfg(feature = "operator")]
+            operator: None,
         }
     }
 }
@@ -830,6 +837,9 @@ impl Session {
                 }
             };
 
+            #[cfg(feature = "operator")]
+            let operator_opts = opts.operator.take();
+
             let session = Arc::new(Self {
                 persistence,
                 bitv_factory,
@@ -909,6 +919,18 @@ impl Session {
                         Self::task_upnp_port_forwarder(announce_port, bind_device),
                     );
                 }
+            }
+
+            #[cfg(feature = "operator")]
+            if let Some(op) = operator_opts
+                && op.enabled
+            {
+                info!("starting AI operator");
+                session.spawn(
+                    debug_span!(parent: session.rs(), "operator"),
+                    "operator",
+                    crate::operator::run(session.clone(), op),
+                );
             }
 
             if let Some(persistence) = session.persistence.as_ref() {
@@ -1075,6 +1097,13 @@ impl Session {
 
     pub fn get_dht(&self) -> Option<&Dht> {
         self.dht.as_ref()
+    }
+
+    /// The shared outbound HTTP client (honors the configured proxy). Used by
+    /// the AI operator to reach its model endpoint.
+    #[cfg(feature = "operator")]
+    pub(crate) fn reqwest_client(&self) -> reqwest::Client {
+        self.reqwest_client.clone()
     }
 
     fn merge_peer_opts(&self, other: Option<PeerConnectionOptions>) -> PeerConnectionOptions {
