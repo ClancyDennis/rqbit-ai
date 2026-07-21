@@ -31,6 +31,33 @@ pub enum Action {
         idx: usize,
         files: BTreeSet<usize>,
     },
+    /// Per-torrent upload rate limit. `None`/`0` means "unlimited".
+    SetTorrentUploadLimit {
+        idx: usize,
+        bps: Option<u32>,
+    },
+    /// Per-torrent download rate limit. `None`/`0` means "unlimited".
+    SetTorrentDownloadLimit {
+        idx: usize,
+        bps: Option<u32>,
+    },
+    /// Trigger an immediate tracker announce for a torrent.
+    ForceReannounce {
+        idx: usize,
+    },
+    /// Re-verify a torrent's on-disk files against the piece hashes.
+    RecheckFiles {
+        idx: usize,
+    },
+    /// Add a tracker URL to a torrent at runtime.
+    AddTracker {
+        idx: usize,
+        url: String,
+    },
+    /// Ban a peer address for the rest of the session.
+    BanPeer {
+        addr: String,
+    },
     ForgetTorrent {
         idx: usize,
     },
@@ -56,8 +83,14 @@ impl Action {
             Action::Pause { .. }
             | Action::Resume { .. }
             | Action::SetGlobalUploadLimit { .. }
-            | Action::SetGlobalDownloadLimit { .. } => ActionTier::Auto,
-            Action::UpdateOnlyFiles { .. } => ActionTier::Notify,
+            | Action::SetGlobalDownloadLimit { .. }
+            | Action::SetTorrentUploadLimit { .. }
+            | Action::SetTorrentDownloadLimit { .. } => ActionTier::Auto,
+            Action::UpdateOnlyFiles { .. }
+            | Action::ForceReannounce { .. }
+            | Action::RecheckFiles { .. }
+            | Action::AddTracker { .. }
+            | Action::BanPeer { .. } => ActionTier::Notify,
             Action::ForgetTorrent { .. } | Action::DeleteTorrentWithFiles { .. } => {
                 ActionTier::Confirm
             }
@@ -71,6 +104,12 @@ impl Action {
             Action::SetGlobalUploadLimit { .. } => "set_global_upload_limit",
             Action::SetGlobalDownloadLimit { .. } => "set_global_download_limit",
             Action::UpdateOnlyFiles { .. } => "update_only_files",
+            Action::SetTorrentUploadLimit { .. } => "set_torrent_upload_limit",
+            Action::SetTorrentDownloadLimit { .. } => "set_torrent_download_limit",
+            Action::ForceReannounce { .. } => "force_reannounce",
+            Action::RecheckFiles { .. } => "recheck_files",
+            Action::AddTracker { .. } => "add_tracker",
+            Action::BanPeer { .. } => "ban_peer",
             Action::ForgetTorrent { .. } => "forget",
             Action::DeleteTorrentWithFiles { .. } => "delete_with_files",
         }
@@ -94,6 +133,23 @@ impl Action {
                 idx: idx()?,
                 files: parse_files(p)?,
             },
+            "set_torrent_upload_limit" => Action::SetTorrentUploadLimit {
+                idx: idx()?,
+                bps: parse_opt_u32(p, "bps"),
+            },
+            "set_torrent_download_limit" => Action::SetTorrentDownloadLimit {
+                idx: idx()?,
+                bps: parse_opt_u32(p, "bps"),
+            },
+            "force_reannounce" => Action::ForceReannounce { idx: idx()? },
+            "recheck_files" => Action::RecheckFiles { idx: idx()? },
+            "add_tracker" => Action::AddTracker {
+                idx: idx()?,
+                url: parse_str(p, "url")?,
+            },
+            "ban_peer" => Action::BanPeer {
+                addr: parse_str(p, "addr")?,
+            },
             "forget" => Action::ForgetTorrent { idx: idx()? },
             "delete_with_files" => Action::DeleteTorrentWithFiles { idx: idx()? },
             other => anyhow::bail!("unknown action kind: {other}"),
@@ -106,6 +162,14 @@ fn parse_opt_u32(p: &ProposedAction, key: &str) -> Option<u32> {
         .get(key)
         .and_then(|v| v.as_u64())
         .and_then(|n| u32::try_from(n).ok())
+}
+
+fn parse_str(p: &ProposedAction, key: &str) -> anyhow::Result<String> {
+    p.params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .with_context(|| format!("action requires a string '{key}' parameter"))
 }
 
 fn parse_files(p: &ProposedAction) -> anyhow::Result<BTreeSet<usize>> {
@@ -176,5 +240,106 @@ mod tests {
             Action::from_proposed(None, &p).unwrap(),
             Action::SetGlobalUploadLimit { bps: Some(500_000) }
         );
+    }
+
+    #[test]
+    fn per_torrent_limits_are_auto_tier() {
+        assert_eq!(
+            Action::SetTorrentUploadLimit {
+                idx: 0,
+                bps: Some(1000)
+            }
+            .tier(),
+            ActionTier::Auto
+        );
+        assert_eq!(
+            Action::SetTorrentDownloadLimit { idx: 0, bps: None }.tier(),
+            ActionTier::Auto
+        );
+    }
+
+    #[test]
+    fn coarse_levers_are_notify_tier() {
+        // Reversible but user-visible: never Auto, never Confirm.
+        assert_eq!(
+            Action::ForceReannounce { idx: 0 }.tier(),
+            ActionTier::Notify
+        );
+        assert_eq!(Action::RecheckFiles { idx: 0 }.tier(), ActionTier::Notify);
+        assert_eq!(
+            Action::AddTracker {
+                idx: 0,
+                url: "http://t.invalid/announce".to_string()
+            }
+            .tier(),
+            ActionTier::Notify
+        );
+        assert_eq!(
+            Action::BanPeer {
+                addr: "1.2.3.4:6881".to_string()
+            }
+            .tier(),
+            ActionTier::Notify
+        );
+    }
+
+    #[test]
+    fn maps_per_torrent_limit_kinds() {
+        let mut p = proposed("set_torrent_download_limit");
+        p.params
+            .insert("bps".to_string(), serde_json::json!(250_000));
+        assert_eq!(
+            Action::from_proposed(Some(7), &p).unwrap(),
+            Action::SetTorrentDownloadLimit {
+                idx: 7,
+                bps: Some(250_000)
+            }
+        );
+        // Per-torrent limits require a torrent_idx.
+        assert!(Action::from_proposed(None, &p).is_err());
+    }
+
+    #[test]
+    fn maps_reannounce_and_recheck() {
+        assert_eq!(
+            Action::from_proposed(Some(2), &proposed("force_reannounce")).unwrap(),
+            Action::ForceReannounce { idx: 2 }
+        );
+        assert_eq!(
+            Action::from_proposed(Some(2), &proposed("recheck_files")).unwrap(),
+            Action::RecheckFiles { idx: 2 }
+        );
+    }
+
+    #[test]
+    fn maps_add_tracker_and_requires_url() {
+        let mut p = proposed("add_tracker");
+        p.params.insert(
+            "url".to_string(),
+            serde_json::json!("http://tracker.invalid/announce"),
+        );
+        assert_eq!(
+            Action::from_proposed(Some(4), &p).unwrap(),
+            Action::AddTracker {
+                idx: 4,
+                url: "http://tracker.invalid/announce".to_string()
+            }
+        );
+        // Missing url is rejected (fail-closed).
+        assert!(Action::from_proposed(Some(4), &proposed("add_tracker")).is_err());
+    }
+
+    #[test]
+    fn maps_ban_peer_and_requires_addr() {
+        let mut p = proposed("ban_peer");
+        p.params
+            .insert("addr".to_string(), serde_json::json!("1.2.3.4:6881"));
+        assert_eq!(
+            Action::from_proposed(None, &p).unwrap(),
+            Action::BanPeer {
+                addr: "1.2.3.4:6881".to_string()
+            }
+        );
+        assert!(Action::from_proposed(None, &proposed("ban_peer")).is_err());
     }
 }

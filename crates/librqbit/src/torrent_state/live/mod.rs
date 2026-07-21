@@ -708,6 +708,19 @@ impl TorrentStateLive {
         self.stats.have_bytes.load(Ordering::Relaxed)
     }
 
+    /// Set this torrent's per-torrent upload rate limit. `None`/`0` means
+    /// unlimited. This only adjusts limit values on the existing limiter; it
+    /// does not touch the data plane (piece picking, scheduling, etc.).
+    pub(crate) fn set_upload_bps(&self, bps: Option<NonZeroU32>) {
+        self.ratelimits.set_upload_bps(bps);
+    }
+
+    /// Set this torrent's per-torrent download rate limit. `None`/`0` means
+    /// unlimited.
+    pub(crate) fn set_download_bps(&self, bps: Option<NonZeroU32>) {
+        self.ratelimits.set_download_bps(bps);
+    }
+
     pub fn get_hns(&self) -> Option<HaveNeededSelected> {
         self.lock_read("get_hns")
             .get_chunks()

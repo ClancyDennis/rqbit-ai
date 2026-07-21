@@ -44,6 +44,44 @@ pub async fn execute(session: &Arc<Session>, action: &Action) -> anyhow::Result<
             let set: HashSet<usize> = files.iter().copied().collect();
             session.update_only_files(&h, &set).await?;
         }
+        Action::SetTorrentUploadLimit { idx, bps } => {
+            let h = resolve(session, *idx)?;
+            session.set_torrent_upload_limit(&h, to_nonzero(*bps))?;
+        }
+        Action::SetTorrentDownloadLimit { idx, bps } => {
+            let h = resolve(session, *idx)?;
+            session.set_torrent_download_limit(&h, to_nonzero(*bps))?;
+        }
+        // Stubbed levers: the Action variant, tier, and mapping exist so the
+        // operator can propose them and they are correctly gated, but the
+        // engine command they map to does not exist yet. Each requires
+        // non-trivial core plumbing (see the task report) that would touch
+        // restricted crates or the connection/data plane, so we fail-closed
+        // rather than force an unsafe implementation.
+        Action::ForceReannounce { .. } => {
+            anyhow::bail!(
+                "force_reannounce not yet implemented: needs a reannounce trigger \
+                 plumbed from TrackerComms (tracker_comms crate) back to the torrent"
+            );
+        }
+        Action::RecheckFiles { .. } => {
+            anyhow::bail!(
+                "recheck_files not yet implemented: needs an in-place re-verify hook \
+                 in the torrent state machine (currently only possible via remove + re-add)"
+            );
+        }
+        Action::AddTracker { .. } => {
+            anyhow::bail!(
+                "add_tracker not yet implemented: needs runtime tracker registration \
+                 on a live TrackerComms handle (tracker_comms crate; no handle is stored today)"
+            );
+        }
+        Action::BanPeer { .. } => {
+            anyhow::bail!(
+                "ban_peer not yet implemented: needs a mutable session ban-set consulted \
+                 in the connection-accept path (connection plane)"
+            );
+        }
         Action::ForgetTorrent { idx } => {
             session.delete(TorrentIdOrHash::from(*idx), false).await?;
         }

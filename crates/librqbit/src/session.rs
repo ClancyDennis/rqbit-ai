@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::Read,
     net::SocketAddr,
+    num::NonZeroU32,
     path::{Component, Path, PathBuf},
     sync::{
         Arc,
@@ -1697,6 +1698,34 @@ impl Session {
     ) -> anyhow::Result<()> {
         handle.update_only_files(only_files)?;
         self.try_update_persistence_metadata(handle).await;
+        Ok(())
+    }
+
+    /// Set a per-torrent upload rate limit. `None`/`0` means unlimited. This
+    /// only takes effect while the torrent is live (limits are rebuilt from
+    /// options on start); a coarse throttle that never touches the data plane.
+    pub fn set_torrent_upload_limit(
+        &self,
+        handle: &ManagedTorrentHandle,
+        bps: Option<NonZeroU32>,
+    ) -> anyhow::Result<()> {
+        let live = handle
+            .live()
+            .context("torrent is not live; cannot set a per-torrent rate limit")?;
+        live.set_upload_bps(bps);
+        Ok(())
+    }
+
+    /// Set a per-torrent download rate limit. `None`/`0` means unlimited.
+    pub fn set_torrent_download_limit(
+        &self,
+        handle: &ManagedTorrentHandle,
+        bps: Option<NonZeroU32>,
+    ) -> anyhow::Result<()> {
+        let live = handle
+            .live()
+            .context("torrent is not live; cannot set a per-torrent rate limit")?;
+        live.set_download_bps(bps);
         Ok(())
     }
 
