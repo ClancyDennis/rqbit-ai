@@ -188,11 +188,72 @@ async fn forward_port(
 
     trace!(status = %status, text=response_text, "AddPortMapping response");
     if !status.is_success() {
-        bail!("failed port forwarding: {}", status);
+        // The router returns the useful detail (a UPnP errorCode such as 718
+        // ConflictInMappingEntry or 725 OnlyPermanentLeasesSupported) inside a
+        // SOAP fault body, not the HTTP status. Surface it so the warning is
+        // actionable instead of a bare "500 Internal Server Error".
+        match parse_upnp_fault(&response_text) {
+            Some((code, desc)) if !desc.is_empty() => {
+                bail!("failed port forwarding: HTTP {status}, UPnP error {code} ({desc})")
+            }
+            Some((code, _)) => bail!("failed port forwarding: HTTP {status}, UPnP error {code}"),
+            None => bail!("failed port forwarding: HTTP {status}"),
+        }
     } else {
         debug!(%local_ip, port, "successfully port forwarded");
     }
     Ok(())
+}
+
+/// Best-effort extraction of the `errorCode`/`errorDescription` from a UPnP
+/// SOAP fault body. Matches on element local names, so it is agnostic to the
+/// SOAP namespace prefix (`s:`, `SOAP-ENV:`, ...) the router happens to use.
+/// Returns `None` if the body is not a recognizable fault.
+fn parse_upnp_fault(body: &str) -> Option<(String, String)> {
+    use quick_xml::events::Event;
+
+    enum Field {
+        Code,
+        Description,
+    }
+
+    let mut reader = quick_xml::Reader::from_str(body);
+    let mut code: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut capture: Option<Field> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                capture = match e.local_name().as_ref() {
+                    b"errorCode" => Some(Field::Code),
+                    b"errorDescription" => Some(Field::Description),
+                    _ => None,
+                };
+            }
+            Ok(Event::Text(t)) => {
+                if let Some(field) = capture.take() {
+                    let decoded = t.decode().unwrap_or_default();
+                    let value = quick_xml::escape::unescape(&decoded)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| decoded.to_string());
+                    let value = value.trim().to_string();
+                    match field {
+                        Field::Code => code = Some(value),
+                        Field::Description => description = Some(value),
+                    }
+                }
+            }
+            Ok(Event::End(_)) => capture = None,
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    match (code, description) {
+        (Some(c), d) => Some((c, d.unwrap_or_default())),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -593,8 +654,53 @@ mod tests {
 
     use crate::{
         DEVICE_DESCRIPTION_BODY_LIMIT, Device, DeviceList, ResponseBodyTooLarge, RootDesc, Service,
-        ServiceList, discover_services,
+        ServiceList, discover_services, parse_upnp_fault,
     };
+
+    #[test]
+    fn parse_upnp_fault_extracts_code_and_description() {
+        let body = r#"<?xml version="1.0"?>
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+            <s:Body>
+                <s:Fault>
+                    <faultcode>s:Client</faultcode>
+                    <faultstring>UPnPError</faultstring>
+                    <detail>
+                        <UPnPError xmlns="urn:schemas-upnp-org:control-1-0">
+                            <errorCode>718</errorCode>
+                            <errorDescription>ConflictInMappingEntry</errorDescription>
+                        </UPnPError>
+                    </detail>
+                </s:Fault>
+            </s:Body>
+        </s:Envelope>"#;
+        assert_eq!(
+            parse_upnp_fault(body),
+            Some(("718".to_string(), "ConflictInMappingEntry".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_upnp_fault_agnostic_to_namespace_prefix() {
+        // Some routers use a different SOAP prefix (e.g. SOAP-ENV) and omit the
+        // description; we should still recover the code.
+        let body = r#"<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP-ENV:Body><SOAP-ENV:Fault><detail><UPnPError>
+                <errorCode>725</errorCode>
+            </UPnPError></detail></SOAP-ENV:Fault></SOAP-ENV:Body>
+        </SOAP-ENV:Envelope>"#;
+        assert_eq!(
+            parse_upnp_fault(body),
+            Some(("725".to_string(), String::new()))
+        );
+    }
+
+    #[test]
+    fn parse_upnp_fault_returns_none_for_non_fault() {
+        assert_eq!(parse_upnp_fault("<html><body>oops</body></html>"), None);
+        assert_eq!(parse_upnp_fault(""), None);
+    }
 
     enum TestBody {
         ContentLength { body: Vec<u8>, declared: usize },
