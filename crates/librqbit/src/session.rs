@@ -74,6 +74,28 @@ use tracker_comms::{TrackerComms, UdpTrackerClient};
 
 pub const SUPPORTED_SCHEMES: [&str; 3] = ["http:", "https:", "magnet:"];
 
+// Keep this aligned with the metadata-size ceiling enforced by peer_info_reader.
+const TORRENT_URL_BODY_LIMIT: usize = 32 * 1024 * 1024;
+
+/// A torrent fetched over HTTP exceeded the accepted metadata size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TorrentUrlBodyTooLarge {
+    pub limit: usize,
+    pub announced_or_observed: u64,
+}
+
+impl std::fmt::Display for TorrentUrlBodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "torrent URL response body is too large: announced or observed {} bytes, limit is {} bytes",
+            self.announced_or_observed, self.limit
+        )
+    }
+}
+
+impl std::error::Error for TorrentUrlBodyTooLarge {}
+
 pub type TorrentId = usize;
 
 struct ParsedTorrentFile {
@@ -165,11 +187,42 @@ async fn torrent_from_url(
     if !response.status().is_success() {
         bail!("GET {} returned {}", url, response.status())
     }
-    let b = response
-        .bytes()
+    let b = read_torrent_response_body_limited(response)
         .await
         .with_context(|| format!("error reading response body from {url}"))?;
     torrent_from_bytes(b).context("error decoding torrent")
+}
+
+async fn read_torrent_response_body_limited(response: reqwest::Response) -> anyhow::Result<Bytes> {
+    if let Some(content_length) = response.content_length()
+        && content_length > TORRENT_URL_BODY_LIMIT as u64
+    {
+        return Err(TorrentUrlBodyTooLarge {
+            limit: TORRENT_URL_BODY_LIMIT,
+            announced_or_observed: content_length,
+        }
+        .into());
+    }
+
+    let initial_capacity = response
+        .content_length()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or(0);
+    let mut body = Vec::with_capacity(initial_capacity);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let observed = body.len().saturating_add(chunk.len());
+        if observed > TORRENT_URL_BODY_LIMIT {
+            return Err(TorrentUrlBodyTooLarge {
+                limit: TORRENT_URL_BODY_LIMIT,
+                announced_or_observed: observed as u64,
+            }
+            .into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body.into())
 }
 
 fn compute_only_files_regex<ByteBuf: AsRef<[u8]>>(
@@ -1550,19 +1603,13 @@ impl Session {
             })
         };
 
-        if self.disable_trackers {
-            trackers.clear();
-        }
-
-        if is_private && trackers.len() > 1 {
+        if is_private && trackers.len() > 1 && !self.disable_trackers {
             warn!(
                 ?info_hash,
                 "private trackers are not fully implemented, so using only the first tracker"
             );
-            trackers.truncate(1);
-        } else if !self.disable_trackers {
-            trackers.extend(self.trackers.iter().cloned());
         }
+        trackers = select_trackers(trackers, &self.trackers, is_private, self.disable_trackers);
 
         let tracker_rx_stats = PeerRxTorrentInfo {
             info_hash,
@@ -1722,6 +1769,24 @@ impl Session {
     }
 }
 
+fn select_trackers<'a>(
+    mut torrent_trackers: Vec<url::Url>,
+    global_trackers: impl IntoIterator<Item = &'a url::Url>,
+    is_private: bool,
+    disable_trackers: bool,
+) -> Vec<url::Url> {
+    if disable_trackers {
+        return Vec::new();
+    }
+
+    if is_private {
+        torrent_trackers.truncate(1);
+    } else {
+        torrent_trackers.extend(global_trackers.into_iter().cloned());
+    }
+    torrent_trackers
+}
+
 pub(crate) struct ResolveMagnetResult {
     pub metadata: TorrentMetadata,
     pub peer_rx: PeerStream,
@@ -1806,11 +1871,101 @@ impl tracker_comms::TorrentStatsProvider for PeerRxTorrentInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
     use buffers::ByteBuf;
     use itertools::Itertools;
     use librqbit_core::torrent_metainfo::{TorrentMetaV1, torrent_from_bytes};
 
-    use super::torrent_file_from_info_bytes;
+    use super::{
+        TORRENT_URL_BODY_LIMIT, TorrentUrlBodyTooLarge, read_torrent_response_body_limited,
+        select_trackers, torrent_file_from_info_bytes, torrent_from_url,
+    };
+
+    enum TestBody {
+        ContentLength(Vec<u8>),
+        DeclaredLength(usize),
+        RepeatedContentLength { byte: u8, len: usize },
+        RepeatedChunked { byte: u8, len: usize },
+    }
+
+    fn serve_once(body: TestBody) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request);
+            match body {
+                TestBody::ContentLength(body) => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    let _ = stream.write_all(&body);
+                }
+                TestBody::DeclaredLength(declared) => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                }
+                TestBody::RepeatedContentLength { byte, len } => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    write_repeated(&mut stream, byte, len);
+                }
+                TestBody::RepeatedChunked { byte, len } => {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap();
+                    let chunk = vec![byte; 64 * 1024];
+                    let mut remaining = len;
+                    while remaining > 0 {
+                        let to_write = remaining.min(chunk.len());
+                        if write!(stream, "{to_write:x}\r\n").is_err()
+                            || stream.write_all(&chunk[..to_write]).is_err()
+                            || stream.write_all(b"\r\n").is_err()
+                        {
+                            return;
+                        }
+                        remaining -= to_write;
+                    }
+                    let _ = stream.write_all(b"0\r\n\r\n");
+                }
+            }
+        });
+        (format!("http://{addr}/"), task)
+    }
+
+    fn write_repeated(stream: &mut impl Write, byte: u8, len: usize) {
+        let chunk = vec![byte; 64 * 1024];
+        let mut remaining = len;
+        while remaining > 0 {
+            let to_write = remaining.min(chunk.len());
+            if stream.write_all(&chunk[..to_write]).is_err() {
+                return;
+            }
+            remaining -= to_write;
+        }
+    }
+
+    fn minimally_valid_torrent() -> Vec<u8> {
+        let mut bytes = b"d4:infod6:lengthi1e4:name1:x12:piece lengthi16384e6:pieces20:".to_vec();
+        bytes.extend_from_slice(&[0; 20]);
+        bytes.extend_from_slice(b"ee");
+        bytes
+    }
 
     #[test]
     fn test_torrent_file_from_info_and_bytes() {
@@ -1832,5 +1987,79 @@ mod tests {
         assert_eq!(parsed.info_hash, generated_parsed.info_hash);
         assert_eq!(parsed.info, generated_parsed.info);
         assert_eq!(parsed_trackers, get_trackers(&generated_parsed));
+    }
+
+    #[test]
+    fn private_zero_tracker_does_not_add_global_trackers() {
+        let global = ["https://global.invalid/announce".parse().unwrap()];
+
+        let selected = select_trackers(Vec::new(), &global, true, false);
+
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn private_one_tracker_does_not_add_global_trackers() {
+        let private: url::Url = "https://private.invalid/announce".parse().unwrap();
+        let global = ["https://global.invalid/announce".parse().unwrap()];
+
+        let selected = select_trackers(vec![private.clone()], &global, true, false);
+
+        assert_eq!(selected, vec![private]);
+    }
+
+    #[tokio::test]
+    async fn torrent_url_body_over_limit_is_rejected() {
+        let (url, server) = serve_once(TestBody::RepeatedChunked {
+            byte: 0,
+            len: TORRENT_URL_BODY_LIMIT + 1,
+        });
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let err = read_torrent_response_body_limited(response)
+            .await
+            .unwrap_err();
+        let err = err.downcast_ref::<TorrentUrlBodyTooLarge>().unwrap();
+        assert_eq!(err.limit, TORRENT_URL_BODY_LIMIT);
+        assert!(err.announced_or_observed > TORRENT_URL_BODY_LIMIT as u64);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn torrent_url_body_at_limit_is_accepted() {
+        let (url, server) = serve_once(TestBody::RepeatedContentLength {
+            byte: b'x',
+            len: TORRENT_URL_BODY_LIMIT,
+        });
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let body = read_torrent_response_body_limited(response).await.unwrap();
+        assert_eq!(body.len(), TORRENT_URL_BODY_LIMIT);
+        assert!(body.iter().all(|byte| *byte == b'x'));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn torrent_url_content_length_over_limit_is_rejected_before_read() {
+        let (url, server) = serve_once(TestBody::DeclaredLength(TORRENT_URL_BODY_LIMIT + 1));
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let err = read_torrent_response_body_limited(response)
+            .await
+            .unwrap_err();
+        let err = err.downcast_ref::<TorrentUrlBodyTooLarge>().unwrap();
+        assert_eq!(
+            err.announced_or_observed,
+            (TORRENT_URL_BODY_LIMIT + 1) as u64
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn torrent_url_accepts_minimally_valid_torrent() {
+        let expected = minimally_valid_torrent();
+        let (url, server) = serve_once(TestBody::ContentLength(expected.clone()));
+        let parsed = torrent_from_url(&reqwest::Client::new(), &url)
+            .await
+            .unwrap();
+        assert_eq!(parsed.torrent_bytes, expected);
+        server.join().unwrap();
     }
 }

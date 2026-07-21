@@ -10,6 +10,7 @@ use futures::future::BoxFuture;
 use http::{HeaderMap, StatusCode};
 use librqbit_dualstack_sockets::TcpListener;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, OnFailure};
 use tracing::{Span, debug, debug_span, info};
 
@@ -43,6 +44,41 @@ pub struct HttpApiOptions {
     pub prometheus_handle: Option<metrics_exporter_prometheus::PrometheusHandle>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum BasicAuthStatus {
+    Authorized,
+    MissingOrMalformed,
+    Unauthorized,
+}
+
+fn basic_auth_status(
+    expected_username: &str,
+    expected_password: &str,
+    headers: &HeaderMap,
+) -> BasicAuthStatus {
+    let user_pass = headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Basic "))
+        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
+        .and_then(|v| String::from_utf8(v).ok());
+    let Some(user_pass) = user_pass else {
+        return BasicAuthStatus::MissingOrMalformed;
+    };
+
+    let Some((username, password)) = user_pass.split_once(':') else {
+        return BasicAuthStatus::Unauthorized;
+    };
+
+    let username_matches = username.as_bytes().ct_eq(expected_username.as_bytes());
+    let password_matches = password.as_bytes().ct_eq(expected_password.as_bytes());
+    if bool::from(username_matches & password_matches) {
+        BasicAuthStatus::Authorized
+    } else {
+        BasicAuthStatus::Unauthorized
+    }
+}
+
 async fn simple_basic_auth(
     expected_username: Option<&str>,
     expected_password: Option<&str>,
@@ -54,26 +90,14 @@ async fn simple_basic_auth(
         (Some(u), Some(p)) => (u, p),
         _ => return Ok(next.run(request).await),
     };
-    let user_pass = headers
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Basic "))
-        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
-        .and_then(|v| String::from_utf8(v).ok());
-    let user_pass = match user_pass {
-        Some(user_pass) => user_pass,
-        None => {
-            return Ok((
-                StatusCode::UNAUTHORIZED,
-                [("WWW-Authenticate", "Basic realm=\"API\"")],
-            )
-                .into_response());
-        }
-    };
-    // TODO: constant time compare
-    match user_pass.split_once(':') {
-        Some((u, p)) if u == expected_user && p == expected_pass => Ok(next.run(request).await),
-        _ => Err(ApiError::unauthorized()),
+    match basic_auth_status(expected_user, expected_pass, &headers) {
+        BasicAuthStatus::Authorized => Ok(next.run(request).await),
+        BasicAuthStatus::MissingOrMalformed => Ok((
+            StatusCode::UNAUTHORIZED,
+            [("WWW-Authenticate", "Basic realm=\"API\"")],
+        )
+            .into_response()),
+        BasicAuthStatus::Unauthorized => Err(ApiError::unauthorized()),
     }
 }
 
@@ -208,5 +232,70 @@ impl HttpApi {
                 .context("error running HTTP API")
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::HeaderValue;
+
+    fn basic_auth_headers(username: &str, password: &str) -> HeaderMap {
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn auth_accepts_valid_credentials() {
+        let headers = basic_auth_headers("api-user", "correct-password");
+        assert_eq!(
+            basic_auth_status("api-user", "correct-password", &headers),
+            BasicAuthStatus::Authorized
+        );
+    }
+
+    #[test]
+    fn auth_rejects_wrong_username() {
+        let headers = basic_auth_headers("wrong-user", "correct-password");
+        assert_eq!(
+            basic_auth_status("api-user", "correct-password", &headers),
+            BasicAuthStatus::Unauthorized
+        );
+    }
+
+    #[test]
+    fn auth_rejects_wrong_password() {
+        let headers = basic_auth_headers("api-user", "wrong-password");
+        assert_eq!(
+            basic_auth_status("api-user", "correct-password", &headers),
+            BasicAuthStatus::Unauthorized
+        );
+    }
+
+    #[test]
+    fn auth_rejects_malformed_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_static("Basic not-base64!"),
+        );
+        assert_eq!(
+            basic_auth_status("api-user", "correct-password", &headers),
+            BasicAuthStatus::MissingOrMalformed
+        );
+    }
+
+    #[test]
+    fn auth_rejects_missing_header() {
+        assert_eq!(
+            basic_auth_status("api-user", "correct-password", &HeaderMap::new()),
+            BasicAuthStatus::MissingOrMalformed
+        );
     }
 }

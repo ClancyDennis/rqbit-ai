@@ -15,7 +15,7 @@ readme = "README.md"
 default = ["default-tls", "http-api-client"]
 
 tokio-console = ["console-subscriber", "tokio/tracing"]
-http-api = ["axum", "tower-http"]
+http-api = ["axum", "tower-http", "subtle"]
 http-api-client = []
 upnp-serve-adapter = ["upnp-serve"]
 webui = []
@@ -111,6 +111,7 @@ librqbit-dualstack-sockets = { workspace = true, features = ["axum"] }
 socket2.workspace = true
 nix = { workspace = true, features = ["uio"] }
 thiserror.workspace = true
+subtle = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32", "Win32_System", "Win32_System_IO", "Win32_System_Ioctl"] }

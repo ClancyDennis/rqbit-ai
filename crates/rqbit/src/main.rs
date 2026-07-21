@@ -63,6 +63,10 @@ fn parse_umask(value: &str) -> anyhow::Result<libc::mode_t> {
     Ok(output)
 }
 
+fn parse_cli_duration(value: &str) -> Result<Duration, humantime::DurationError> {
+    humantime::parse_duration(value)
+}
+
 #[derive(Parser)]
 #[command(version, author, about)]
 struct Opts {
@@ -87,7 +91,7 @@ struct Opts {
     /// The interval to poll trackers, e.g. 30s.
     /// Trackers send the refresh interval when we connect to them. Often this is
     /// pretty big, e.g. 30 minutes. This can force a certain value.
-    #[arg(short = 'i', long = "tracker-refresh-interval", value_parser = parse_duration::parse, env="RQBIT_TRACKER_REFRESH_INTERVAL")]
+    #[arg(short = 'i', long = "tracker-refresh-interval", value_parser = parse_cli_duration, env="RQBIT_TRACKER_REFRESH_INTERVAL")]
     force_tracker_interval: Option<Duration>,
 
     /// The listen address for HTTP API.
@@ -142,11 +146,11 @@ struct Opts {
     dht_bootstrap_addrs: Option<String>,
 
     /// The connect timeout, e.g. 1s, 1.5s, 100ms etc.
-    #[arg(long = "peer-connect-timeout", value_parser = parse_duration::parse, default_value="2s", env="RQBIT_PEER_CONNECT_TIMEOUT")]
+    #[arg(long = "peer-connect-timeout", value_parser = parse_cli_duration, default_value="2s", env="RQBIT_PEER_CONNECT_TIMEOUT")]
     peer_connect_timeout: Duration,
 
     /// The timeout for read() and write() operations, e.g. 1s, 1.5s, 100ms etc.
-    #[arg(long = "peer-read-write-timeout" , value_parser = parse_duration::parse, default_value="10s", env="RQBIT_PEER_READ_WRITE_TIMEOUT")]
+    #[arg(long = "peer-read-write-timeout" , value_parser = parse_cli_duration, default_value="10s", env="RQBIT_PEER_READ_WRITE_TIMEOUT")]
     peer_read_write_timeout: Duration,
 
     /// The maximum number of connected peers per torrent.
@@ -1238,6 +1242,12 @@ fn spawn_stats_printer(session: Arc<Session>) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use clap::{Parser, error::ErrorKind};
+
+    use crate::{Opts, parse_cli_duration};
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_parse_umask() {
@@ -1254,5 +1264,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn duration_cli_accepts_two_seconds() {
+        let opts = Opts::try_parse_from(["rqbit", "--peer-connect-timeout", "2s", "download"])
+            .unwrap_or_else(|error| panic!("failed to parse documented duration: {error}"));
+        assert_eq!(opts.peer_connect_timeout, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn duration_cli_accepts_ten_seconds() {
+        let opts = Opts::try_parse_from(["rqbit", "--peer-read-write-timeout", "10s", "download"])
+            .unwrap_or_else(|error| panic!("failed to parse documented duration: {error}"));
+        assert_eq!(opts.peer_read_write_timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn duration_parser_preserves_fractional_and_millisecond_syntax() {
+        assert_eq!(
+            parse_cli_duration("1.5s").expect("fractional seconds should remain supported"),
+            Duration::from_millis(1_500)
+        );
+        assert_eq!(
+            parse_cli_duration("100ms").expect("milliseconds should remain supported"),
+            Duration::from_millis(100)
+        );
+    }
+
+    #[test]
+    fn duration_cli_accepts_combined_units() {
+        let opts =
+            Opts::try_parse_from(["rqbit", "--tracker-refresh-interval", "1h 30m", "download"])
+                .unwrap_or_else(|error| panic!("failed to parse combined duration: {error}"));
+        assert_eq!(
+            opts.force_tracker_interval,
+            Some(Duration::from_secs(90 * 60))
+        );
+    }
+
+    #[test]
+    fn duration_cli_rejects_malformed_input() {
+        let error = Opts::try_parse_from([
+            "rqbit",
+            "--peer-connect-timeout",
+            "not-a-duration",
+            "download",
+        ])
+        .err()
+        .expect("malformed duration should be rejected");
+        assert_eq!(error.kind(), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn duration_cli_rejects_huge_exponent_quickly() {
+        let started = Instant::now();
+        let error = Opts::try_parse_from([
+            "rqbit",
+            "--peer-connect-timeout",
+            "1e1000000000s",
+            "download",
+        ])
+        .err()
+        .expect("exponential duration should be rejected");
+        let elapsed = started.elapsed();
+
+        assert_eq!(error.kind(), ErrorKind::ValueValidation);
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "rejecting a huge exponent took {elapsed:?}"
+        );
     }
 }

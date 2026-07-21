@@ -22,7 +22,7 @@ serde_derive.workspace = true
 urlencoding.workspace = true
 rand.workspace = true
 tracing.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 bencode.workspace = true
 url.workspace = true
 parking_lot.workspace = true

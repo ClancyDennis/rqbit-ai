@@ -20,6 +20,64 @@ const SSDP_MULTICAST_IP: SocketAddr =
 pub const SSDP_SEARCH_WAN_IPCONNECTION_ST: &str = "urn:schemas-upnp-org:service:WANIPConnection:1";
 pub const SSDP_SEARCH_ROOT_ST: &str = "upnp:rootdevice";
 
+/// Device descriptions are normally tens of KiB. 512 KiB allows unusually
+/// detailed devices while bounding XML received from an untrusted LAN host.
+const DEVICE_DESCRIPTION_BODY_LIMIT: usize = 512 * 1024;
+/// SOAP AddPortMapping responses are tiny; 64 KiB leaves ample room for
+/// vendor-specific error details without allowing an unbounded response.
+const SOAP_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
+
+/// An HTTP response exceeded the protocol-specific body limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponseBodyTooLarge {
+    pub limit: usize,
+    pub announced_or_observed: u64,
+}
+
+impl std::fmt::Display for ResponseBodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HTTP response body is too large: announced or observed {} bytes, limit is {} bytes",
+            self.announced_or_observed, self.limit
+        )
+    }
+}
+
+impl std::error::Error for ResponseBodyTooLarge {}
+
+async fn read_response_body_limited(
+    response: reqwest::Response,
+    limit: usize,
+) -> anyhow::Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length()
+        && content_length > limit as u64
+    {
+        return Err(ResponseBodyTooLarge {
+            limit,
+            announced_or_observed: content_length,
+        }
+        .into());
+    }
+
+    let initial_capacity = response.content_length().unwrap_or(0) as usize;
+    let mut body = Vec::with_capacity(initial_capacity);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let observed = body.len().saturating_add(chunk.len());
+        if observed > limit {
+            return Err(ResponseBodyTooLarge {
+                limit,
+                announced_or_observed: observed as u64,
+            }
+            .into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 pub fn make_ssdp_search_request(kind: &str) -> String {
     format!(
         "M-SEARCH * HTTP/1.1\r\n\
@@ -121,10 +179,12 @@ async fn forward_port(
 
     let status = response.status();
 
-    let response_text = response
-        .text()
-        .await
-        .context("error reading response text")?;
+    let response_text = String::from_utf8_lossy(
+        &read_response_body_limited(response, SOAP_RESPONSE_BODY_LIMIT)
+            .await
+            .context("error reading response text")?,
+    )
+    .into_owned();
 
     trace!(status = %status, text=response_text, "AddPortMapping response");
     if !status.is_success() {
@@ -269,10 +329,11 @@ pub async fn discover_services(location: Url) -> anyhow::Result<RootDesc> {
         .get(location.clone())
         .send()
         .await
-        .context("failed to send GET request")?
-        .text()
+        .context("failed to send GET request")?;
+    let response = read_response_body_limited(response, DEVICE_DESCRIPTION_BODY_LIMIT)
         .await
         .context("failed to read response body")?;
+    let response = String::from_utf8_lossy(&response);
     trace!("received from {location}: {response}");
     let root_desc: RootDesc = quick_xml::de::from_str(&response)
         .context("failed to parse response body as xml")
@@ -524,9 +585,52 @@ impl UpnpPortForwarder {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
     use quick_xml::de::from_str;
 
-    use crate::{Device, DeviceList, RootDesc, Service, ServiceList};
+    use crate::{
+        DEVICE_DESCRIPTION_BODY_LIMIT, Device, DeviceList, ResponseBodyTooLarge, RootDesc, Service,
+        ServiceList, discover_services,
+    };
+
+    enum TestBody {
+        ContentLength { body: Vec<u8>, declared: usize },
+        Chunked(Vec<u8>),
+    }
+
+    fn serve_once(body: TestBody) -> (url::Url, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request);
+            match body {
+                TestBody::ContentLength { body, declared } => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    let _ = stream.write_all(&body);
+                }
+                TestBody::Chunked(body) => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    let _ = stream.write_all(&body);
+                    let _ = stream.write_all(b"\r\n0\r\n\r\n");
+                }
+            }
+        });
+        (url::Url::parse(&format!("http://{addr}/")).unwrap(), task)
+    }
 
     #[test]
     fn test_parse_root_desc() {
@@ -578,5 +682,42 @@ mod tests {
             }],
         };
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn upnp_xml_over_limit_is_rejected() {
+        let (url, server) = serve_once(TestBody::Chunked(vec![
+            b'x';
+            DEVICE_DESCRIPTION_BODY_LIMIT + 1
+        ]));
+        let err = discover_services(url).await.unwrap_err();
+        let err = err.downcast_ref::<ResponseBodyTooLarge>().unwrap();
+        assert_eq!(err.limit, DEVICE_DESCRIPTION_BODY_LIMIT);
+        assert!(err.announced_or_observed > DEVICE_DESCRIPTION_BODY_LIMIT as u64);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn upnp_xml_at_limit_is_accepted() {
+        let mut body = include_bytes!("resources/test/devices-0.xml").to_vec();
+        body.resize(DEVICE_DESCRIPTION_BODY_LIMIT, b' ');
+        let (url, server) = serve_once(TestBody::ContentLength {
+            body,
+            declared: DEVICE_DESCRIPTION_BODY_LIMIT,
+        });
+        let root = discover_services(url).await.unwrap();
+        assert!(!root.devices.is_empty());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn upnp_content_length_over_limit_is_rejected_before_read() {
+        let (url, server) = serve_once(TestBody::ContentLength {
+            body: Vec::new(),
+            declared: DEVICE_DESCRIPTION_BODY_LIMIT + 1,
+        });
+        let err = discover_services(url).await.unwrap_err();
+        assert!(err.downcast_ref::<ResponseBodyTooLarge>().is_some());
+        server.join().unwrap();
     }
 }

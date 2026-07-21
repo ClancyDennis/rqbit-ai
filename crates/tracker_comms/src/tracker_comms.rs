@@ -26,6 +26,62 @@ use crate::tracker_comms_udp;
 use crate::tracker_comms_udp::UdpTrackerClient;
 use librqbit_core::hash_id::Id20;
 
+/// HTTP tracker responses are normally a few KiB. One MiB still permits over
+/// 170,000 compact IPv4 peers while bounding memory use from an untrusted
+/// tracker.
+const HTTP_TRACKER_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
+
+/// An HTTP response exceeded the protocol-specific body limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponseBodyTooLarge {
+    pub limit: usize,
+    pub announced_or_observed: u64,
+}
+
+impl std::fmt::Display for ResponseBodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HTTP response body is too large: announced or observed {} bytes, limit is {} bytes",
+            self.announced_or_observed, self.limit
+        )
+    }
+}
+
+impl std::error::Error for ResponseBodyTooLarge {}
+
+async fn read_response_body_limited(
+    response: reqwest::Response,
+    limit: usize,
+) -> anyhow::Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length()
+        && content_length > limit as u64
+    {
+        return Err(ResponseBodyTooLarge {
+            limit,
+            announced_or_observed: content_length,
+        }
+        .into());
+    }
+
+    let initial_capacity = response.content_length().unwrap_or(0) as usize;
+    let mut body = Vec::with_capacity(initial_capacity);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let observed = body.len().saturating_add(chunk.len());
+        if observed > limit {
+            return Err(ResponseBodyTooLarge {
+                limit,
+                announced_or_observed: observed as u64,
+            }
+            .into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 pub struct TrackerComms {
     info_hash: Id20,
     peer_id: Id20,
@@ -294,7 +350,7 @@ impl TrackerComms {
         if !response.status().is_success() {
             anyhow::bail!("tracker responded with {:?}", response.status());
         }
-        let bytes = response.bytes().await?;
+        let bytes = read_response_body_limited(response, HTTP_TRACKER_RESPONSE_BODY_LIMIT).await?;
         if let Ok((error, _)) =
             bencode::from_bytes_with_rest::<tracker_comms_http::TrackerError>(&bytes)
         {
@@ -434,5 +490,98 @@ impl TrackerComms {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod response_body_tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    use super::*;
+
+    enum TestBody {
+        ContentLength { body: Vec<u8>, declared: usize },
+        Chunked(Vec<u8>),
+    }
+
+    fn serve_once(body: TestBody) -> (Url, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request);
+            match body {
+                TestBody::ContentLength { body, declared } => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    let _ = stream.write_all(&body);
+                }
+                TestBody::Chunked(body) => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    let _ = stream.write_all(&body);
+                    let _ = stream.write_all(b"\r\n0\r\n\r\n");
+                }
+            }
+        });
+        (Url::parse(&format!("http://{addr}/")).unwrap(), task)
+    }
+
+    #[tokio::test]
+    async fn tracker_body_over_limit_is_rejected() {
+        let (url, server) = serve_once(TestBody::Chunked(vec![
+            0;
+            HTTP_TRACKER_RESPONSE_BODY_LIMIT + 1
+        ]));
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let err = read_response_body_limited(response, HTTP_TRACKER_RESPONSE_BODY_LIMIT)
+            .await
+            .unwrap_err();
+        let err = err.downcast_ref::<ResponseBodyTooLarge>().unwrap();
+        assert_eq!(err.limit, HTTP_TRACKER_RESPONSE_BODY_LIMIT);
+        assert!(
+            err.announced_or_observed > HTTP_TRACKER_RESPONSE_BODY_LIMIT as u64,
+            "incremental reads must reject only after observing bytes beyond the limit"
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn tracker_body_at_limit_is_accepted() {
+        let body = vec![b'x'; HTTP_TRACKER_RESPONSE_BODY_LIMIT];
+        let (url, server) = serve_once(TestBody::ContentLength {
+            body: body.clone(),
+            declared: body.len(),
+        });
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let actual = read_response_body_limited(response, HTTP_TRACKER_RESPONSE_BODY_LIMIT)
+            .await
+            .unwrap();
+        assert_eq!(actual, body);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn tracker_content_length_over_limit_is_rejected_before_read() {
+        let (url, server) = serve_once(TestBody::ContentLength {
+            body: Vec::new(),
+            declared: HTTP_TRACKER_RESPONSE_BODY_LIMIT + 1,
+        });
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let err = read_response_body_limited(response, HTTP_TRACKER_RESPONSE_BODY_LIMIT)
+            .await
+            .unwrap_err();
+        assert!(err.downcast_ref::<ResponseBodyTooLarge>().is_some());
+        server.join().unwrap();
     }
 }
