@@ -48,6 +48,8 @@ struct State {
     pending: VecDeque<PendingConfirmation>,
     next_seq: u64,
     next_pending_id: u64,
+    /// Keyless snapshot of the config the running loop started with.
+    effective: Option<crate::operator::persist::OperatorPersistedConfig>,
 }
 
 /// Cloneable-behind-Arc shared operator state.
@@ -111,6 +113,16 @@ impl OperatorHandle {
     pub fn decisions(&self) -> Vec<DecisionRecord> {
         let s = self.state.lock();
         s.decisions.iter().rev().cloned().collect()
+    }
+
+    /// Record the (keyless) config the running loop started with.
+    pub(crate) fn set_effective(&self, cfg: crate::operator::persist::OperatorPersistedConfig) {
+        self.state.lock().effective = Some(cfg);
+    }
+
+    /// The config the running loop is using, if any.
+    pub fn effective(&self) -> Option<crate::operator::persist::OperatorPersistedConfig> {
+        self.state.lock().effective.clone()
     }
 
     /// Pending confirmations awaiting human action.

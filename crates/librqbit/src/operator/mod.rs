@@ -11,10 +11,12 @@
 //!   clearly-delimited data, never as instructions.
 //! - Action tiers are assigned by rqbit code (`Action::tier`), not the model.
 //!
-//! Stage C (current): the loop maps model suggestions to typed actions and
-//! executes only the reversible AUTO tier (and only when not in dry-run,
-//! capped per tick). NOTIFY actions are surfaced but not executed; destructive
-//! CONFIRM actions are enqueued for human confirmation and never auto-fired.
+//! The loop maps model suggestions to typed actions and executes only the
+//! reversible AUTO tier (when not in dry-run, capped per tick, subject to
+//! cooldowns). NOTIFY actions are surfaced but not executed; destructive
+//! CONFIRM actions (incl. ban-peer) are enqueued for human confirmation via the
+//! HTTP API and never auto-fired. The decision log, confirmations, and (UI-
+//! editable, restart-to-apply) config are exposed over HTTP.
 
 mod action;
 mod config;
@@ -23,6 +25,7 @@ mod executor;
 mod handle;
 mod model;
 mod model_openai;
+mod persist;
 mod policy;
 mod prompt;
 mod snapshot;
@@ -32,6 +35,9 @@ pub use config::{ModelConfig, OperatorOptions};
 pub use handle::{DecisionRecord, OperatorHandle, PendingConfirmationView};
 pub use model::{
     DecisionInput, DecisionOutput, EchoModel, NullModel, OperatorModel, SuggestedAction,
+};
+pub use persist::{
+    OperatorPersistedConfig, load as load_persisted_config, save as save_persisted_config,
 };
 
 use std::sync::Arc;
@@ -60,6 +66,7 @@ pub async fn run(
         Box::new(NullModel)
     };
 
+    handle.set_effective(persist::OperatorPersistedConfig::from_options(&opts));
     run_with_model(session, opts, model, handle).await
 }
 

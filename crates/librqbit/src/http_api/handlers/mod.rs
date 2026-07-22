@@ -116,7 +116,8 @@ pub fn make_api_router(state: ApiState) -> Router {
             .route(
                 "/operator/confirmations",
                 get(operator::h_operator_confirmations),
-            );
+            )
+            .route("/operator/config", get(operator::h_operator_config));
     }
 
     if !state.opts.read_only {
@@ -151,10 +152,12 @@ pub fn make_api_router(state: ApiState) -> Router {
 
         #[cfg(feature = "operator")]
         {
-            api_router = api_router.route(
-                "/operator/confirmations/{id}/{decision}",
-                post(operator::h_operator_confirm),
-            );
+            api_router = api_router
+                .route(
+                    "/operator/confirmations/{id}/{decision}",
+                    post(operator::h_operator_confirm),
+                )
+                .route("/operator/config", post(operator::h_operator_config_set));
         }
     }
 

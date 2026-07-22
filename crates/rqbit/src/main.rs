@@ -733,8 +733,11 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
         ipv4_only: opts.ipv4_only,
         client_name_and_version: None,
         #[cfg(feature = "operator")]
-        operator: if opts.operator_enabled {
-            Some(librqbit::operator::OperatorOptions {
+        // The UI-managed persisted config (if any) is the durable source of
+        // truth and takes precedence; CLI flags seed the first run.
+        operator: match librqbit::operator::load_persisted_config() {
+            Some(cfg) => Some(cfg.to_options()),
+            None if opts.operator_enabled => Some(librqbit::operator::OperatorOptions {
                 enabled: true,
                 dry_run: !opts.operator_live,
                 interval: std::time::Duration::from_secs(opts.operator_poll_interval_secs),
@@ -746,9 +749,8 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
                 },
                 max_auto_actions_per_tick: 2,
                 asn_db_path: opts.operator_asn_db.clone(),
-            })
-        } else {
-            None
+            }),
+            None => None,
         },
     };
 
