@@ -1,5 +1,12 @@
 import { createContext } from "react";
-import { LimitsConfig, RqbitAPI, SessionStats } from "./api-types";
+import {
+  LimitsConfig,
+  OperatorActionResponse,
+  OperatorConfirmationsResponse,
+  OperatorDecisionsResponse,
+  RqbitAPI,
+  SessionStats,
+} from "./api-types";
 
 export const APIContext = createContext<RqbitAPI>({
   listTorrents: () => {
@@ -51,6 +58,19 @@ export const APIContext = createContext<RqbitAPI>({
     throw new Error("Function not implemented.");
   },
   setLimits: function (limits: LimitsConfig): Promise<void> {
+    throw new Error("Function not implemented.");
+  },
+  getOperatorDecisions: function (): Promise<OperatorDecisionsResponse> {
+    throw new Error("Function not implemented.");
+  },
+  getOperatorConfirmations:
+    function (): Promise<OperatorConfirmationsResponse> {
+      throw new Error("Function not implemented.");
+    },
+  operatorApprove: function (id: number): Promise<OperatorActionResponse> {
+    throw new Error("Function not implemented.");
+  },
+  operatorReject: function (id: number): Promise<OperatorActionResponse> {
     throw new Error("Function not implemented.");
   },
 });

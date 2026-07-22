@@ -3,6 +3,9 @@ import {
   ErrorDetails,
   LimitsConfig,
   ListTorrentsResponse,
+  OperatorActionResponse,
+  OperatorConfirmationsResponse,
+  OperatorDecisionsResponse,
   PeerStatsSnapshot,
   RqbitAPI,
   SessionStats,
@@ -203,5 +206,17 @@ export const API: RqbitAPI & { getVersion: () => Promise<string> } = {
   },
   setLimits: (limits: LimitsConfig): Promise<void> => {
     return makeRequest("POST", "/torrents/limits", limits, true);
+  },
+  getOperatorDecisions: (): Promise<OperatorDecisionsResponse> => {
+    return makeRequest("GET", "/operator/decisions");
+  },
+  getOperatorConfirmations: (): Promise<OperatorConfirmationsResponse> => {
+    return makeRequest("GET", "/operator/confirmations");
+  },
+  operatorApprove: (id: number): Promise<OperatorActionResponse> => {
+    return makeRequest("POST", `/operator/confirmations/${id}/approve`);
+  },
+  operatorReject: (id: number): Promise<OperatorActionResponse> => {
+    return makeRequest("POST", `/operator/confirmations/${id}/reject`);
   },
 };

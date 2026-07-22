@@ -5,6 +5,11 @@ import {
   AddTorrentResponse,
   LimitsConfig,
   ListTorrentsResponse,
+  OperatorActionResponse,
+  OperatorConfirmation,
+  OperatorConfirmationsResponse,
+  OperatorDecision,
+  OperatorDecisionsResponse,
   PeerStatsSnapshot,
   RqbitAPI,
   SessionStats,
@@ -392,6 +397,78 @@ function updatePeerCounters(torrentId: number): void {
 
 const TOTAL_TORRENTS = 1000;
 
+// Mock AI operator state
+let operatorSeq = 42;
+const mockDecisions: OperatorDecision[] = [
+  {
+    seq: operatorSeq--,
+    kind: "pause_stalled",
+    tier: "auto",
+    torrent_idx: 3,
+    rationale: "No peers for 15 minutes; pausing to save resources.",
+    confidence: 0.92,
+    outcome: "applied",
+  },
+  {
+    seq: operatorSeq--,
+    kind: "prioritize",
+    tier: "notify",
+    torrent_idx: 7,
+    rationale: "Torrent is close to completion; bumped priority.",
+    confidence: 0.71,
+    outcome: "applied",
+  },
+  {
+    seq: operatorSeq--,
+    kind: "recheck",
+    tier: "confirm",
+    torrent_idx: 12,
+    rationale: "Detected possible corruption in 2 pieces.",
+    confidence: 0.55,
+    outcome: "awaiting_confirmation",
+  },
+  {
+    seq: operatorSeq--,
+    kind: "adjust_limits",
+    tier: "auto",
+    torrent_idx: null,
+    rationale: "Upload saturating link; reduced global upload cap.",
+    confidence: 0.88,
+    outcome: "applied",
+  },
+];
+
+const mockConfirmations: OperatorConfirmation[] = [
+  {
+    id: 1,
+    kind: "delete_torrent",
+    torrent_idx: 21,
+    rationale: "Seeding complete for 30 days with no leechers; safe to remove.",
+  },
+  {
+    id: 2,
+    kind: "recheck",
+    torrent_idx: 12,
+    rationale: "Detected possible corruption in 2 pieces.",
+  },
+];
+
+function resolveMockConfirmation(id: number, outcome: string): void {
+  const idx = mockConfirmations.findIndex((c) => c.id === id);
+  if (idx === -1) return;
+  const c = mockConfirmations[idx];
+  mockConfirmations.splice(idx, 1);
+  mockDecisions.unshift({
+    seq: operatorSeq++,
+    kind: c.kind,
+    tier: "confirm",
+    torrent_idx: c.torrent_idx,
+    rationale: c.rationale,
+    confidence: null,
+    outcome,
+  });
+}
+
 // Mock API implementation
 export const MockAPI: RqbitAPI & { getVersion: () => Promise<string> } = {
   getStreamLogsUrl: () => null,
@@ -602,5 +679,28 @@ export const MockAPI: RqbitAPI & { getVersion: () => Promise<string> } = {
 
   setLimits: async (): Promise<void> => {
     await new Promise((r) => setTimeout(r, 50));
+  },
+
+  getOperatorDecisions: async (): Promise<OperatorDecisionsResponse> => {
+    await new Promise((r) => setTimeout(r, 30));
+    return { decisions: [...mockDecisions] };
+  },
+
+  getOperatorConfirmations:
+    async (): Promise<OperatorConfirmationsResponse> => {
+      await new Promise((r) => setTimeout(r, 30));
+      return { confirmations: [...mockConfirmations] };
+    },
+
+  operatorApprove: async (id: number): Promise<OperatorActionResponse> => {
+    await new Promise((r) => setTimeout(r, 50));
+    resolveMockConfirmation(id, "approved");
+    return { status: "approved" };
+  },
+
+  operatorReject: async (id: number): Promise<OperatorActionResponse> => {
+    await new Promise((r) => setTimeout(r, 50));
+    resolveMockConfirmation(id, "rejected");
+    return { status: "rejected" };
   },
 };
