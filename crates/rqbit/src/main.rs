@@ -685,6 +685,7 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
         })
     };
 
+    #[allow(clippy::needless_update)]
     let mut sopts = SessionOptions {
         dht,
         // This will be overridden by "server start" below if needed.
@@ -755,6 +756,11 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
             }),
             None => None,
         },
+        // `operator` is only a field when librqbit is built with the operator
+        // feature, which can be enabled by another workspace crate (feature
+        // unification) even when this binary's own `operator` feature is off.
+        // Default fills it in that case.
+        ..Default::default()
     };
 
     #[allow(clippy::needless_update)]
