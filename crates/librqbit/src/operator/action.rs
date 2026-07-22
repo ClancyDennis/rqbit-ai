@@ -77,6 +77,16 @@ pub enum ActionTier {
     Confirm,
 }
 
+impl ActionTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ActionTier::Auto => "auto",
+            ActionTier::Notify => "notify",
+            ActionTier::Confirm => "confirm",
+        }
+    }
+}
+
 impl Action {
     pub fn tier(&self) -> ActionTier {
         match self {

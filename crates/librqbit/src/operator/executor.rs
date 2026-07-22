@@ -14,15 +14,6 @@ use crate::api::TorrentIdOrHash;
 use crate::operator::action::Action;
 use crate::torrent_state::ManagedTorrentHandle;
 
-/// A destructive action awaiting explicit human confirmation. Enqueued by the
-/// loop; consumed by the confirmation UI/endpoint (a later stage).
-#[derive(Debug, Clone)]
-pub struct PendingConfirmation {
-    pub id: u64,
-    pub action: Action,
-    pub rationale: String,
-}
-
 pub async fn execute(session: &Arc<Session>, action: &Action) -> anyhow::Result<()> {
     match action {
         Action::Pause { idx } => {

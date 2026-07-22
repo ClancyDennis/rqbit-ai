@@ -146,6 +146,10 @@ pub struct Session {
     /// Per-torrent reannounce signals, so a caller can trigger an immediate
     /// tracker announce. Keyed by info hash; (re)set when a torrent goes live.
     reannounce_notify: RwLock<HashMap<Id20, Arc<tokio::sync::Notify>>>,
+    /// Shared AI-operator state (decision log + pending confirmations), present
+    /// only when the operator is enabled. Read/actioned by the HTTP API.
+    #[cfg(all(feature = "operator", feature = "http-api"))]
+    operator_handle: Option<Arc<crate::operator::OperatorHandle>>,
     disable_trackers: bool,
 
     // Lifecycle management
@@ -844,6 +848,11 @@ impl Session {
 
             #[cfg(feature = "operator")]
             let operator_opts = opts.operator.take();
+            #[cfg(feature = "operator")]
+            let operator_handle: Option<Arc<crate::operator::OperatorHandle>> = operator_opts
+                .as_ref()
+                .filter(|o| o.enabled)
+                .map(|_| Arc::new(crate::operator::OperatorHandle::default()));
 
             let session = Arc::new(Self {
                 persistence,
@@ -870,6 +879,8 @@ impl Session {
                 udp_tracker_client,
                 tracker_stats: Arc::new(TrackerStatsRegistry::default()),
                 reannounce_notify: Default::default(),
+                #[cfg(all(feature = "operator", feature = "http-api"))]
+                operator_handle: operator_handle.clone(),
                 ratelimits: Limits::new(opts.ratelimits),
                 ipv4_only: opts.ipv4_only,
                 trackers: opts.trackers,
@@ -931,12 +942,13 @@ impl Session {
             #[cfg(feature = "operator")]
             if let Some(op) = operator_opts
                 && op.enabled
+                && let Some(handle) = operator_handle
             {
                 info!("starting AI operator");
                 session.spawn(
                     debug_span!(parent: session.rs(), "operator"),
                     "operator",
-                    crate::operator::run(session.clone(), op),
+                    crate::operator::run(session.clone(), op, handle),
                 );
             }
 
@@ -1117,6 +1129,12 @@ impl Session {
     #[cfg(feature = "operator")]
     pub(crate) fn tracker_stats(&self) -> &Arc<TrackerStatsRegistry> {
         &self.tracker_stats
+    }
+
+    /// Shared AI-operator state, if the operator is enabled.
+    #[cfg(all(feature = "operator", feature = "http-api"))]
+    pub(crate) fn operator_handle(&self) -> Option<&Arc<crate::operator::OperatorHandle>> {
+        self.operator_handle.as_ref()
     }
 
     /// Ask all active tracker announce loops for this torrent to re-announce

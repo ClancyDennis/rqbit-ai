@@ -20,6 +20,7 @@ mod action;
 mod config;
 mod enrich;
 mod executor;
+mod handle;
 mod model;
 mod model_openai;
 mod policy;
@@ -28,26 +29,26 @@ mod snapshot;
 
 pub use action::{Action, ActionTier};
 pub use config::{ModelConfig, OperatorOptions};
-pub use executor::PendingConfirmation;
+pub use handle::{DecisionRecord, OperatorHandle, PendingConfirmationView};
 pub use model::{
     DecisionInput, DecisionOutput, EchoModel, NullModel, OperatorModel, SuggestedAction,
 };
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::Session;
 use model_openai::OpenAiCompatModel;
 
-/// Bound on the in-memory pending-confirmation queue (until a UI consumes it).
-const MAX_PENDING_CONFIRMATIONS: usize = 128;
-
 /// Run the operator loop for the lifetime of the session.
 ///
 /// Spawned via [`Session::spawn`], so it is cancelled automatically when the
 /// session's cancellation token fires; this function itself simply loops.
-pub async fn run(session: Arc<Session>, opts: OperatorOptions) -> anyhow::Result<()> {
+pub async fn run(
+    session: Arc<Session>,
+    opts: OperatorOptions,
+    handle: Arc<OperatorHandle>,
+) -> anyhow::Result<()> {
     let model: Box<dyn OperatorModel> = if opts.model.is_configured() {
         info!(model = %opts.model.model, "operator: using configured model endpoint");
         Box::new(OpenAiCompatModel::new(
@@ -59,7 +60,7 @@ pub async fn run(session: Arc<Session>, opts: OperatorOptions) -> anyhow::Result
         Box::new(NullModel)
     };
 
-    run_with_model(session, opts, model).await
+    run_with_model(session, opts, model, handle).await
 }
 
 /// Loop body, factored out so tests can inject a deterministic model.
@@ -67,6 +68,7 @@ async fn run_with_model(
     session: Arc<Session>,
     opts: OperatorOptions,
     model: Box<dyn OperatorModel>,
+    handle: Arc<OperatorHandle>,
 ) -> anyhow::Result<()> {
     info!(
         interval_secs = opts.interval.as_secs(),
@@ -74,9 +76,6 @@ async fn run_with_model(
         max_auto_actions_per_tick = opts.max_auto_actions_per_tick,
         "operator started"
     );
-
-    let mut pending: VecDeque<PendingConfirmation> = VecDeque::new();
-    let mut next_confirmation_id: u64 = 0;
 
     // Peer ASN/org enricher (no-op unless an ASN db path is configured).
     let enricher = enrich::build_enricher(opts.asn_db_path.as_deref());
@@ -114,71 +113,67 @@ async fn run_with_model(
                 }
             };
             let tier = action.tier();
-            // rationale is model output; treat as data in logs.
-            info!(
-                action = action.kind_str(),
-                ?tier,
-                torrent = ?d.torrent_idx,
-                confidence = ?d.confidence,
-                rationale = %d.rationale,
-                "operator decision"
-            );
-
-            match tier {
+            let outcome: String = match tier {
                 ActionTier::Confirm => {
-                    info!(
-                        action = action.kind_str(),
-                        "operator: destructive action requires confirmation; NOT executed"
-                    );
-                    if pending.len() >= MAX_PENDING_CONFIRMATIONS {
-                        pending.pop_front();
-                    }
-                    pending.push_back(PendingConfirmation {
-                        id: next_confirmation_id,
-                        action,
-                        rationale: d.rationale.clone(),
-                    });
-                    next_confirmation_id += 1;
+                    let id = handle.queue_confirmation(action.clone(), d.rationale.clone());
+                    format!("queued for confirmation (id {id})")
                 }
-                ActionTier::Notify => {
-                    info!(
-                        action = action.kind_str(),
-                        "operator: notify-tier action surfaced; not executed in this stage"
-                    );
-                }
+                ActionTier::Notify => "surfaced (notify tier; not executed)".to_string(),
                 ActionTier::Auto => {
                     if opts.dry_run {
-                        info!(
-                            action = action.kind_str(),
-                            "operator: would execute (dry-run)"
-                        );
+                        "dry-run (would execute)".to_string()
                     } else if auto_executed >= opts.max_auto_actions_per_tick {
-                        info!(
-                            action = action.kind_str(),
-                            "operator: per-tick auto-action cap reached; deferring"
-                        );
+                        "skipped: per-tick auto-action cap reached".to_string()
                     } else if let Err(reason) = guardrails.check_and_record(&action) {
-                        info!(
-                            action = action.kind_str(),
-                            "operator: skipped by guardrail ({reason})"
-                        );
+                        format!("skipped: {reason}")
                     } else {
                         match executor::execute(&session, &action).await {
                             Ok(()) => {
                                 auto_executed += 1;
-                                info!(action = action.kind_str(), "operator: executed");
+                                "executed".to_string()
                             }
-                            Err(e) => {
-                                warn!(
-                                    action = action.kind_str(),
-                                    "operator: execution failed: {e:#}"
-                                )
-                            }
+                            Err(e) => format!("failed: {e:#}"),
                         }
                     }
                 }
-            }
+            };
+            // rationale is model output; treat as data.
+            info!(
+                action = action.kind_str(),
+                tier = tier.as_str(),
+                torrent = ?d.torrent_idx,
+                confidence = ?d.confidence,
+                outcome = %outcome,
+                "operator decision"
+            );
+            handle.record_decision(
+                action.kind_str(),
+                tier,
+                action.target_idx(),
+                &d.rationale,
+                d.confidence,
+                outcome,
+            );
         }
+    }
+}
+
+/// Approve or reject a queued destructive confirmation. On approve, executes
+/// the action. Called by the HTTP API.
+pub async fn confirm(
+    session: &Arc<Session>,
+    handle: &OperatorHandle,
+    id: u64,
+    approve: bool,
+) -> anyhow::Result<&'static str> {
+    let pending = handle
+        .take_pending(id)
+        .ok_or_else(|| anyhow::anyhow!("no pending confirmation with id {id}"))?;
+    if approve {
+        executor::execute(session, &pending.action).await?;
+        Ok("approved")
+    } else {
+        Ok("rejected")
     }
 }
 

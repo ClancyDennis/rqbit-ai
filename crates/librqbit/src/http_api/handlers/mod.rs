@@ -1,6 +1,8 @@
 mod configure;
 mod dht;
 mod logging;
+#[cfg(feature = "operator")]
+mod operator;
 mod other;
 mod playlist;
 mod streaming;
@@ -107,6 +109,16 @@ pub fn make_api_router(state: ApiState) -> Router {
         )
         .route("/torrents/limits", get(configure::h_get_session_ratelimits));
 
+    #[cfg(feature = "operator")]
+    {
+        api_router = api_router
+            .route("/operator/decisions", get(operator::h_operator_decisions))
+            .route(
+                "/operator/confirmations",
+                get(operator::h_operator_confirmations),
+            );
+    }
+
     if !state.opts.read_only {
         api_router = api_router
             .route("/torrents", post(torrents::h_torrents_post))
@@ -136,6 +148,14 @@ pub fn make_api_router(state: ApiState) -> Router {
             )
             .route("/torrents/{id}/add_peers", post(torrents::h_add_peers))
             .route("/torrents/create", post(torrents::h_create_torrent));
+
+        #[cfg(feature = "operator")]
+        {
+            api_router = api_router.route(
+                "/operator/confirmations/{id}/{decision}",
+                post(operator::h_operator_confirm),
+            );
+        }
     }
 
     api_router.with_state(state)
