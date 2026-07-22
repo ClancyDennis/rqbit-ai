@@ -22,6 +22,7 @@ mod enrich;
 mod executor;
 mod model;
 mod model_openai;
+mod policy;
 mod prompt;
 mod snapshot;
 
@@ -79,6 +80,8 @@ async fn run_with_model(
 
     // Peer ASN/org enricher (no-op unless an ASN db path is configured).
     let enricher = enrich::build_enricher(opts.asn_db_path.as_deref());
+    // Deterministic anti-thrash cooldowns, enforced in code (not by the model).
+    let mut guardrails = policy::Guardrails::new();
 
     let mut ticker = tokio::time::interval(opts.interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -153,6 +156,11 @@ async fn run_with_model(
                         info!(
                             action = action.kind_str(),
                             "operator: per-tick auto-action cap reached; deferring"
+                        );
+                    } else if let Err(reason) = guardrails.check_and_record(&action) {
+                        info!(
+                            action = action.kind_str(),
+                            "operator: skipped by guardrail ({reason})"
                         );
                     } else {
                         match executor::execute(&session, &action).await {

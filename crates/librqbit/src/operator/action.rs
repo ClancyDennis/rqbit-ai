@@ -118,6 +118,26 @@ impl Action {
         }
     }
 
+    /// The torrent this action targets, if any (used for per-target cooldowns).
+    /// Global and peer-scoped actions return `None`.
+    pub fn target_idx(&self) -> Option<usize> {
+        match self {
+            Action::Pause { idx }
+            | Action::Resume { idx }
+            | Action::UpdateOnlyFiles { idx, .. }
+            | Action::SetTorrentUploadLimit { idx, .. }
+            | Action::SetTorrentDownloadLimit { idx, .. }
+            | Action::ForceReannounce { idx }
+            | Action::RecheckFiles { idx }
+            | Action::AddTracker { idx, .. }
+            | Action::ForgetTorrent { idx }
+            | Action::DeleteTorrentWithFiles { idx } => Some(*idx),
+            Action::SetGlobalUploadLimit { .. }
+            | Action::SetGlobalDownloadLimit { .. }
+            | Action::BanPeer { .. } => None,
+        }
+    }
+
     /// Map a model-proposed action into a strict [`Action`]. Returns an error
     /// for unknown kinds or missing required parameters, so the caller can skip
     /// it (fail-closed).
