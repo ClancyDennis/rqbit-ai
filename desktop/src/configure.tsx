@@ -3,8 +3,8 @@ import { RqbitDesktopConfig } from "./configuration";
 import { invokeAPI } from "./api";
 import { ErrorDetails } from "rqbit-webui/src/api-types";
 import { ErrorWithLabel } from "rqbit-webui/src/rqbit-web";
-import { FormCheckbox } from "rqbit-webui/src/components/forms/FormCheckbox";
-import { FormInput as FI } from "rqbit-webui/src/components/forms/FormInput";
+import { FormCheckbox as FormCheck } from "rqbit-webui/src/components/forms/FormCheckbox";
+import { FormInput } from "rqbit-webui/src/components/forms/FormInput";
 import { Fieldset } from "rqbit-webui/src/components/forms/Fieldset";
 import {
   TabbedConfigModal,
@@ -12,50 +12,9 @@ import {
 } from "rqbit-webui/src/components/modal/TabbedConfigModal";
 import { RateLimitsTab } from "rqbit-webui/src/components/config/RateLimitsTab";
 
-const FormCheck: React.FC<{
-  label: string;
-  name: string;
-  checked: boolean;
-  onChange: React.ChangeEventHandler<HTMLInputElement>;
-  disabled?: boolean;
-  help?: string;
-}> = ({ label, name, checked, onChange, disabled, help }) => {
-  return (
-    <FormCheckbox
-      label={label}
-      name={name}
-      checked={checked}
-      onChange={onChange}
-      disabled={disabled}
-      help={help}
-    />
-  );
-};
-
-const FormInput: React.FC<{
-  label: string;
-  name: string;
-  value: string | number;
-  inputType: string;
-  onChange: React.ChangeEventHandler<HTMLInputElement>;
-  disabled?: boolean;
-  help?: string;
-}> = ({ label, name, value, inputType, onChange, disabled, help }) => {
-  return (
-    <FI
-      inputType={inputType}
-      name={name}
-      value={value as string}
-      onChange={onChange}
-      disabled={disabled}
-      label={label}
-      help={help}
-    />
-  );
-};
-
 export const ConfigModal: React.FC<{
   show: boolean;
+  isOnboarding?: boolean;
   handleStartReconfigure: () => void;
   handleConfigured: (config: RqbitDesktopConfig) => void;
   handleCancel?: () => void;
@@ -63,6 +22,7 @@ export const ConfigModal: React.FC<{
   defaultConfig: RqbitDesktopConfig;
 }> = ({
   show,
+  isOnboarding,
   handleStartReconfigure,
   handleConfigured,
   handleCancel,
@@ -144,6 +104,13 @@ export const ConfigModal: React.FC<{
       label: "Home",
       content: (
         <Fieldset>
+          {isOnboarding && (
+            <p className="text-sm text-secondary mb-4">
+              Welcome to rqbit! Pick where downloads should go to get started —
+              the defaults for everything else are fine. You can change any of
+              this later from the settings button in the top bar.
+            </p>
+          )}
           <FormInput
             label="Default download folder"
             name="default_download_location"
@@ -203,29 +170,31 @@ Might be useful e.g. if rqbit upload consumes all your upload bandwidth and inte
       id: "session",
       label: "Session",
       content: (
-        <Fieldset>
-          <FormCheck
-            label="Enable persistence"
-            name="persistence.disable"
-            checked={!config.persistence.disable}
-            onChange={handleToggleChange}
-            help="If you disable session persistence, rqbit won't remember the torrents you had before restart."
-          />
-          <FormInput
-            label="Persistence folder"
-            name="persistence.folder"
-            inputType="text"
-            value={config.persistence.folder}
-            onChange={handleInputChange}
-            disabled={config.persistence.disable}
-          />
-          <FormCheck
-            label="Enable fast resume (experimental)"
-            name="persistence.fastresume"
-            checked={config.persistence.fastresume}
-            onChange={handleToggleChange}
-            help="If enabled, restarting will not rehash torrents, and thus will be faster. You should not modify the downloaded files in any way if you use that."
-          />
+        <>
+          <Fieldset label="Persistence">
+            <FormCheck
+              label="Enable persistence"
+              name="persistence.disable"
+              checked={!config.persistence.disable}
+              onChange={handleToggleChange}
+              help="If you disable session persistence, rqbit won't remember the torrents you had before restart."
+            />
+            <FormInput
+              label="Persistence folder"
+              name="persistence.folder"
+              inputType="text"
+              value={config.persistence.folder}
+              onChange={handleInputChange}
+              disabled={config.persistence.disable}
+            />
+            <FormCheck
+              label="Enable fast resume (experimental)"
+              name="persistence.fastresume"
+              checked={config.persistence.fastresume}
+              onChange={handleToggleChange}
+              help="If enabled, restarting will not rehash torrents, and thus will be faster. You should not modify the downloaded files in any way if you use that."
+            />
+          </Fieldset>
           <RateLimitsTab
             downloadBps={config.ratelimits.download_bps}
             uploadBps={config.ratelimits.upload_bps}
@@ -242,79 +211,87 @@ Might be useful e.g. if rqbit upload consumes all your upload bandwidth and inte
               }))
             }
           />
-        </Fieldset>
+        </>
       ),
     },
     {
       id: "connection",
       label: "Connection",
       content: (
-        <Fieldset>
-          <FormCheck
-            label="Listen on TCP"
-            name="connections.enable_tcp_listen"
-            checked={config.connections.enable_tcp_listen}
-            onChange={handleToggleChange}
-            help="Listen for torrent requests on TCP. Required for peers to be able to connect to you, mainly for uploading."
-          />
-          <FormCheck
-            label="Listen on uTP (over UDP)"
-            name="connections.enable_utp"
-            checked={config.connections.enable_utp}
-            onChange={handleToggleChange}
-            help="Listen for torrent requests on uTP over UDP. Required for uTP support in general, both outgoing and incoming."
-          />
-          <FormCheck
-            label="Advertise port over UPnP"
-            name="connections.enable_upnp_port_forward"
-            checked={config.connections.enable_upnp_port_forward}
-            onChange={handleToggleChange}
-            help="Advertise your port over UPnP to your router(s). This is required for peers to be able to connect to you from the internet. Will only work if your router has a static IP."
-          />
-          <FormCheck
-            label="[ADVANCED] Disable outgoing connections over TCP"
-            name="connections.enable_tcp_outgoing"
-            checked={!config.connections.enable_tcp_outgoing}
-            onChange={handleToggleChange}
-            help="WARNING: leave this unchecked unless you know what you are doing."
-          />
-          <FormInput
-            inputType="text"
-            label="Socks proxy"
-            name="connections.socks_proxy"
-            value={config.connections.socks_proxy}
-            onChange={handleInputChange}
-            help="Socks5 proxy for outgoing connections. Format: socks5://[username:password@]host:port"
-          />
-          <FormInput
-            inputType="number"
-            label="Port"
-            name="connections.listen_port"
-            value={config.connections.listen_port}
-            disabled={
-              !config.connections.enable_tcp_listen &&
-              !config.connections.enable_utp
-            }
-            onChange={handleInputChange}
-            help="The port to listen on for both TCP and UDP (if enabled)."
-          />
-          <FormInput
-            label="Peer connect timeout (seconds)"
-            inputType="number"
-            name="connections.peer_connect_timeout"
-            value={config.connections.peer_connect_timeout}
-            onChange={handleInputChange}
-            help="How much to wait for outgoing connections to connect. Default is low to prefer faster peers."
-          />
-          <FormInput
-            label="Peer read/write timeout (seconds)"
-            inputType="number"
-            name="connections.peer_read_write_timeout"
-            value={config.connections.peer_read_write_timeout}
-            onChange={handleInputChange}
-            help="Peer socket read/write timeout."
-          />
-        </Fieldset>
+        <>
+          <Fieldset label="Listening">
+            <FormCheck
+              label="Listen on TCP"
+              name="connections.enable_tcp_listen"
+              checked={config.connections.enable_tcp_listen}
+              onChange={handleToggleChange}
+              help="Listen for torrent requests on TCP. Required for peers to be able to connect to you, mainly for uploading."
+            />
+            <FormCheck
+              label="Listen on uTP (over UDP)"
+              name="connections.enable_utp"
+              checked={config.connections.enable_utp}
+              onChange={handleToggleChange}
+              help="Listen for torrent requests on uTP over UDP. Required for uTP support in general, both outgoing and incoming."
+            />
+            <FormCheck
+              label="Advertise port over UPnP"
+              name="connections.enable_upnp_port_forward"
+              checked={config.connections.enable_upnp_port_forward}
+              onChange={handleToggleChange}
+              help="Advertise your port over UPnP to your router(s). This is required for peers to be able to connect to you from the internet. Will only work if your router has a static IP."
+            />
+            <FormInput
+              inputType="number"
+              label="Port"
+              name="connections.listen_port"
+              value={config.connections.listen_port}
+              disabled={
+                !config.connections.enable_tcp_listen &&
+                !config.connections.enable_utp
+              }
+              onChange={handleInputChange}
+              help="The port to listen on for both TCP and UDP (if enabled)."
+            />
+          </Fieldset>
+          <Fieldset label="Proxy">
+            <FormInput
+              inputType="text"
+              label="Socks proxy"
+              name="connections.socks_proxy"
+              value={config.connections.socks_proxy}
+              onChange={handleInputChange}
+              help="Socks5 proxy for outgoing connections. Format: socks5://[username:password@]host:port"
+            />
+          </Fieldset>
+          <Fieldset label="Timeouts">
+            <FormInput
+              label="Peer connect timeout (seconds)"
+              inputType="number"
+              name="connections.peer_connect_timeout"
+              value={config.connections.peer_connect_timeout}
+              onChange={handleInputChange}
+              help="How much to wait for outgoing connections to connect. Default is low to prefer faster peers."
+            />
+            <FormInput
+              label="Peer read/write timeout (seconds)"
+              inputType="number"
+              name="connections.peer_read_write_timeout"
+              value={config.connections.peer_read_write_timeout}
+              onChange={handleInputChange}
+              help="Peer socket read/write timeout."
+            />
+          </Fieldset>
+          <Fieldset label="Advanced">
+            <FormCheck
+              label="Disable outgoing connections over TCP"
+              name="connections.enable_tcp_outgoing"
+              checked={!config.connections.enable_tcp_outgoing}
+              onChange={handleToggleChange}
+              help="⚠ Warning: leave this off unless you know what you are doing. Disabling outgoing TCP can severely limit the peers you can reach."
+            />
+          </Fieldset>
+        </>
       ),
     },
     {
@@ -378,10 +355,11 @@ Might be useful e.g. if rqbit upload consumes all your upload bandwidth and inte
   return (
     <TabbedConfigModal
       isOpen={show}
-      onClose={handleCancel}
-      title="Configure Rqbit desktop"
+      onClose={isOnboarding ? undefined : handleCancel}
+      title={isOnboarding ? "Welcome to rqbit" : "Configure rqbit"}
       tabs={tabs}
       onSave={handleOkClick}
+      saveButtonText={isOnboarding ? "Get started" : "OK"}
       onReset={() => setConfig(defaultConfig)}
       showResetButton={true}
       isSaving={loading}

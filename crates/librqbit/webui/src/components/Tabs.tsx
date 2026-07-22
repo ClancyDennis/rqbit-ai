@@ -30,7 +30,7 @@ export interface TabListProps {
 }
 
 export const TabList: React.FC<TabListProps> = ({ children, className }) => (
-  <div className={`flex border-b border-divider ${className ?? ""}`}>
+  <div className={`flex flex-wrap border-b border-divider ${className ?? ""}`}>
     {children}
   </div>
 );

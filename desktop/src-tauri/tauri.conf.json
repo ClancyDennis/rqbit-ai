@@ -27,7 +27,9 @@
         "resizable": true,
         "title": "rqbit",
         "width": 1024,
-        "height": 600
+        "height": 600,
+        "minWidth": 800,
+        "minHeight": 500
       }
     ],
     "security": {

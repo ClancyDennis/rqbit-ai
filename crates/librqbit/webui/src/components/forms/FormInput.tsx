@@ -1,7 +1,7 @@
 import { ChangeEventHandler } from "react";
 
 export const FormInput: React.FC<{
-  value: string;
+  value: string | number;
   label?: string;
   autoFocus?: boolean;
   name: string;
@@ -38,7 +38,9 @@ export const FormInput: React.FC<{
         onKeyDown={onKeyDown}
         onChange={onChange}
       />
-      {help && <div className="text-sm text-secondary">{help}</div>}
+      {help && (
+        <div className="text-sm text-secondary whitespace-pre-line">{help}</div>
+      )}
     </div>
   );
 };

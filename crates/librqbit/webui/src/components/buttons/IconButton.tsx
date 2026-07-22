@@ -8,6 +8,7 @@ export const IconButton: React.FC<{
   children: any;
   href?: string;
   title?: string;
+  "aria-label"?: string;
 }> = (props) => {
   const {
     onClick,

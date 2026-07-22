@@ -25,7 +25,8 @@ export const TorrentDetailsModal: React.FC<TorrentDetailsModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={title}
-      className="sm:max-w-4xl flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-4rem)]"
+      widthClassName="sm:max-w-4xl"
+      className="flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-4rem)]"
     >
       <ActionBar hideFilters />
       <div className="flex-1 min-h-0">

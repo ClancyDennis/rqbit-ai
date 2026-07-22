@@ -6,6 +6,7 @@ import { RqbitDesktop } from "./rqbit-desktop";
 import { APIContext } from "rqbit-webui/src/context";
 import { RqbitWebUI } from "rqbit-webui/src/rqbit-web";
 import * as HttpApi from "rqbit-webui/src/http-api";
+import { useErrorStore } from "rqbit-webui/src/stores/errorStore";
 
 import "./styles/index.css";
 
@@ -41,8 +42,17 @@ Promise.all([get_version(), get_default_config(), get_current_config()])
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <StrictMode>
         <APIContext.Provider value={HttpApi.API}>
-          <RqbitWebUI title="rqbit" version="desktop fallback" />
+          <RqbitWebUI title="rqbit" version="desktop (fallback)" />
         </APIContext.Provider>
       </StrictMode>,
     );
+
+    // Let the user know we couldn't reach the desktop backend and are
+    // running against the plain HTTP API instead.
+    useErrorStore.getState().setAlert({
+      text: "Running in fallback mode",
+      details: {
+        text: "Couldn't reach the rqbit desktop backend, so the app is connected to the HTTP API at http://localhost:3030 instead. Settings are unavailable in this mode.",
+      },
+    });
   });

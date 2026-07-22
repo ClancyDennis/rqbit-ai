@@ -47,7 +47,7 @@ export const TabbedConfigModal: React.FC<TabbedConfigModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={title}
-      className="sm:max-w-4xl"
+      widthClassName="sm:max-w-3xl"
     >
       <ModalBody>
         <ErrorComponent error={error ?? null} />

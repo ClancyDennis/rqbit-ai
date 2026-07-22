@@ -49,7 +49,7 @@ export const FormCheckbox: React.FC<{
         )}
 
         {help && (
-          <div className="text-sm text-slate-500 dark:text-slate-300 mb-3">
+          <div className="text-sm text-slate-500 dark:text-slate-300 mb-3 whitespace-pre-line">
             {help}
           </div>
         )}

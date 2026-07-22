@@ -20,6 +20,8 @@ export const RqbitDesktop: React.FC<{
 
   const configButton = (
     <IconButton
+      title="Settings"
+      aria-label="Settings"
       onClick={() => {
         setConfigurationOpened(true);
       }}
@@ -32,13 +34,14 @@ export const RqbitDesktop: React.FC<{
     <APIContext.Provider value={makeAPI(config)}>
       {configured && (
         <RqbitWebUI
-          title={`Rqbit Desktop`}
+          title="rqbit"
           version={version}
           menuButtons={[configButton]}
         ></RqbitWebUI>
       )}
       <ConfigModal
         show={!configured || configurationOpened}
+        isOnboarding={!configured}
         handleStartReconfigure={() => {
           setConfigured(false);
         }}
