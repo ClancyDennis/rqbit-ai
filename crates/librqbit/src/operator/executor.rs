@@ -52,18 +52,16 @@ pub async fn execute(session: &Arc<Session>, action: &Action) -> anyhow::Result<
             let h = resolve(session, *idx)?;
             session.set_torrent_download_limit(&h, to_nonzero(*bps))?;
         }
+        Action::ForceReannounce { idx } => {
+            let h = resolve(session, *idx)?;
+            session.force_reannounce(h.info_hash())?;
+        }
         // Stubbed levers: the Action variant, tier, and mapping exist so the
         // operator can propose them and they are correctly gated, but the
         // engine command they map to does not exist yet. Each requires
         // non-trivial core plumbing (see the task report) that would touch
         // restricted crates or the connection/data plane, so we fail-closed
         // rather than force an unsafe implementation.
-        Action::ForceReannounce { .. } => {
-            anyhow::bail!(
-                "force_reannounce not yet implemented: needs a reannounce trigger \
-                 plumbed from TrackerComms (tracker_comms crate) back to the torrent"
-            );
-        }
         Action::RecheckFiles { .. } => {
             anyhow::bail!(
                 "recheck_files not yet implemented: needs an in-place re-verify hook \

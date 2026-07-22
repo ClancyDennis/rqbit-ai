@@ -85,9 +85,12 @@ impl Action {
             | Action::SetGlobalUploadLimit { .. }
             | Action::SetGlobalDownloadLimit { .. }
             | Action::SetTorrentUploadLimit { .. }
-            | Action::SetTorrentDownloadLimit { .. } => ActionTier::Auto,
+            | Action::SetTorrentDownloadLimit { .. }
+            // Reannounce is reversible and low-risk (just re-announces to
+            // trackers already in use), and is now implemented, so it may run
+            // automatically (capped per tick).
+            | Action::ForceReannounce { .. } => ActionTier::Auto,
             Action::UpdateOnlyFiles { .. }
-            | Action::ForceReannounce { .. }
             | Action::RecheckFiles { .. }
             | Action::AddTracker { .. }
             | Action::BanPeer { .. } => ActionTier::Notify,
@@ -259,12 +262,14 @@ mod tests {
     }
 
     #[test]
+    fn reannounce_is_auto_tier() {
+        // Implemented, reversible, low-risk -> may run automatically.
+        assert_eq!(Action::ForceReannounce { idx: 0 }.tier(), ActionTier::Auto);
+    }
+
+    #[test]
     fn coarse_levers_are_notify_tier() {
         // Reversible but user-visible: never Auto, never Confirm.
-        assert_eq!(
-            Action::ForceReannounce { idx: 0 }.tier(),
-            ActionTier::Notify
-        );
         assert_eq!(Action::RecheckFiles { idx: 0 }.tier(), ActionTier::Notify);
         assert_eq!(
             Action::AddTracker {

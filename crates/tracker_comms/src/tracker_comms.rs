@@ -95,6 +95,8 @@ pub struct TrackerComms {
     reqwest_client: reqwest::Client,
     key: u32,
     tracker_stats: Arc<TrackerStatsRegistry>,
+    /// Fired to interrupt the inter-announce sleep and re-announce immediately.
+    reannounce: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Default)]
@@ -209,6 +211,7 @@ impl TrackerComms {
         reqwest_client: reqwest::Client,
         udp_client: UdpTrackerClient,
         tracker_stats: Arc<TrackerStatsRegistry>,
+        reannounce: Arc<tokio::sync::Notify>,
     ) -> Option<BoxStream<'static, SocketAddr>> {
         let trackers = trackers
             .into_iter()
@@ -242,6 +245,7 @@ impl TrackerComms {
                 reqwest_client,
                 key: rand::random(),
                 tracker_stats,
+                reannounce,
             });
             let mut futures = FuturesUnordered::new();
             for tracker in trackers {
@@ -324,7 +328,12 @@ impl TrackerComms {
             event = None;
             let interval = self.force_tracker_interval.unwrap_or(interval);
             debug!("sleeping for {:?} after calling tracker", interval);
-            tokio::time::sleep(interval).await;
+            tokio::select! {
+                _ = tokio::time::sleep(interval) => {}
+                _ = self.reannounce.notified() => {
+                    debug!("reannounce requested; announcing now");
+                }
+            }
         }
     }
 
@@ -413,7 +422,12 @@ impl TrackerComms {
         loop {
             if let Some(i) = sleep_interval {
                 trace!(interval=?sleep_interval, "sleeping");
-                tokio::time::sleep(i).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(i) => {}
+                    _ = self.reannounce.notified() => {
+                        debug!("reannounce requested; announcing now");
+                    }
+                }
             }
 
             // This should retry forever until the addrs are resolved.

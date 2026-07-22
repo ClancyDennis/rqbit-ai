@@ -143,6 +143,9 @@ pub struct Session {
     reqwest_client: reqwest::Client,
     udp_tracker_client: UdpTrackerClient,
     tracker_stats: Arc<TrackerStatsRegistry>,
+    /// Per-torrent reannounce signals, so a caller can trigger an immediate
+    /// tracker announce. Keyed by info hash; (re)set when a torrent goes live.
+    reannounce_notify: RwLock<HashMap<Id20, Arc<tokio::sync::Notify>>>,
     disable_trackers: bool,
 
     // Lifecycle management
@@ -866,6 +869,7 @@ impl Session {
                 )),
                 udp_tracker_client,
                 tracker_stats: Arc::new(TrackerStatsRegistry::default()),
+                reannounce_notify: Default::default(),
                 ratelimits: Limits::new(opts.ratelimits),
                 ipv4_only: opts.ipv4_only,
                 trackers: opts.trackers,
@@ -1113,6 +1117,19 @@ impl Session {
     #[cfg(feature = "operator")]
     pub(crate) fn tracker_stats(&self) -> &Arc<TrackerStatsRegistry> {
         &self.tracker_stats
+    }
+
+    /// Ask all active tracker announce loops for this torrent to re-announce
+    /// immediately, interrupting their inter-announce sleep. Best-effort: has no
+    /// effect if the torrent has no live tracker announces.
+    pub fn force_reannounce(&self, info_hash: Id20) -> anyhow::Result<()> {
+        match self.reannounce_notify.read().get(&info_hash).cloned() {
+            Some(n) => {
+                n.notify_waiters();
+                Ok(())
+            }
+            None => anyhow::bail!("no active tracker announces to reannounce"),
+        }
     }
 
     fn merge_peer_opts(&self, other: Option<PeerConnectionOptions>) -> PeerConnectionOptions {
@@ -1653,6 +1670,10 @@ impl Session {
             info_hash,
             session: self.clone(),
         };
+        let reannounce = Arc::new(tokio::sync::Notify::new());
+        self.reannounce_notify
+            .write()
+            .insert(info_hash, reannounce.clone());
         let tracker_rx = TrackerComms::start(
             info_hash,
             self.peer_id,
@@ -1663,6 +1684,7 @@ impl Session {
             self.reqwest_client.clone(),
             self.udp_tracker_client.clone(),
             self.tracker_stats.clone(),
+            reannounce,
         );
 
         let initial_peers_rx = if initial_peers.is_empty() {
