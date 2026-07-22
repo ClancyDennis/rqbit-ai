@@ -4,6 +4,9 @@ Scope: repository HEAD `1fd0818e6efc1b48fd15b07fbc09ac8ad6e524cf`.
 
 All source locations refer to that immutable baseline; later edits may shift local line numbers.
 
+The proposed implementation contract derived from this analysis is in
+[`network-policy-design.md`](network-policy-design.md).
+
 This analysis distinguishes traffic that is proxied, traffic that is intentionally local, and traffic that bypasses the configured SOCKS proxy or bind policy. “Leak” below means traffic that contradicts a reasonable proxy-only or interface-only expectation; it does not mean that all direct BitTorrent traffic is a defect in Normal mode.
 
 ## Current defaults
