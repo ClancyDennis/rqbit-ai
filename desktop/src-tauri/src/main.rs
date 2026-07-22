@@ -418,6 +418,62 @@ fn get_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+#[tauri::command]
+fn operator_decisions(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    let decisions = api
+        .session()
+        .operator_handle()
+        .map(|h| h.decisions())
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "decisions": decisions }))
+}
+
+#[tauri::command]
+fn operator_confirmations(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    let confirmations = api
+        .session()
+        .operator_handle()
+        .map(|h| h.confirmations())
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "confirmations": confirmations }))
+}
+
+#[tauri::command]
+async fn operator_confirm(
+    state: tauri::State<'_, State>,
+    id: u64,
+    decision: String,
+) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    let session = api.session();
+    let handle = session
+        .operator_handle()
+        .with_status_error(StatusCode::FAILED_DEPENDENCY, "operator is not enabled")?;
+    let approve = decision == "approve";
+    let status = librqbit::operator::confirm(session, handle, id, approve).await?;
+    Ok(serde_json::json!({ "status": status }))
+}
+
+#[tauri::command]
+fn operator_config(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    let running = api.session().operator_handle().and_then(|h| h.effective());
+    let config = librqbit::operator::load_persisted_config()
+        .or_else(|| running.clone())
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "config": config, "running": running.is_some() }))
+}
+
+#[tauri::command]
+fn operator_config_set(
+    config: librqbit::operator::OperatorPersistedConfig,
+) -> Result<serde_json::Value, ApiError> {
+    librqbit::operator::save_persisted_config(&config)?;
+    Ok(serde_json::json!({ "status": "saved", "note": "restart to apply" }))
+}
+
 async fn start() {
     tauri::async_runtime::set(tokio::runtime::Handle::current());
     let init_logging_result = init_logging(InitLoggingOptions {
@@ -442,6 +498,11 @@ async fn start() {
             config_current,
             config_default,
             get_version,
+            operator_config,
+            operator_config_set,
+            operator_confirm,
+            operator_confirmations,
+            operator_decisions,
             stats,
             torrent_action_configure,
             torrent_action_delete,

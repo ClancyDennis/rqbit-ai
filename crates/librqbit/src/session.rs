@@ -1135,9 +1135,10 @@ impl Session {
         &self.tracker_stats
     }
 
-    /// Shared AI-operator state, if the operator is enabled.
+    /// Shared AI-operator state, if the operator is enabled. Used by the HTTP
+    /// API and by the desktop app's Tauri commands.
     #[cfg(all(feature = "operator", feature = "http-api"))]
-    pub(crate) fn operator_handle(&self) -> Option<&Arc<crate::operator::OperatorHandle>> {
+    pub fn operator_handle(&self) -> Option<&Arc<crate::operator::OperatorHandle>> {
         self.operator_handle.as_ref()
     }
 

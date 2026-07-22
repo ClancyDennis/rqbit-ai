@@ -9,6 +9,11 @@ import {
   ErrorDetails,
   SessionStats,
   PeerStatsSnapshot,
+  OperatorDecisionsResponse,
+  OperatorConfirmationsResponse,
+  OperatorActionResponse,
+  OperatorConfig,
+  OperatorConfigResponse,
 } from "rqbit-webui/src/api-types";
 
 import { InvokeArgs, invoke } from "@tauri-apps/api/core";
@@ -166,5 +171,25 @@ export const makeAPI = (configuration: RqbitDesktopConfig): RqbitAPI => {
       // Desktop manages rate limits via config change, not this API
       return Promise.resolve();
     },
+    getOperatorDecisions: () =>
+      invokeAPI<OperatorDecisionsResponse>("operator_decisions"),
+    getOperatorConfirmations: () =>
+      invokeAPI<OperatorConfirmationsResponse>("operator_confirmations"),
+    operatorApprove: (id: number) =>
+      invokeAPI<OperatorActionResponse>("operator_confirm", {
+        id,
+        decision: "approve",
+      }),
+    operatorReject: (id: number) =>
+      invokeAPI<OperatorActionResponse>("operator_confirm", {
+        id,
+        decision: "reject",
+      }),
+    getOperatorConfig: () =>
+      invokeAPI<OperatorConfigResponse>("operator_config"),
+    setOperatorConfig: (config: OperatorConfig) =>
+      invokeAPI<{ status: string; note: string }>("operator_config_set", {
+        config,
+      }),
   };
 };
