@@ -18,6 +18,7 @@
 
 mod action;
 mod config;
+mod enrich;
 mod executor;
 mod model;
 mod model_openai;
@@ -76,6 +77,9 @@ async fn run_with_model(
     let mut pending: VecDeque<PendingConfirmation> = VecDeque::new();
     let mut next_confirmation_id: u64 = 0;
 
+    // Peer ASN/org enricher (no-op unless an ASN db path is configured).
+    let enricher = enrich::build_enricher(opts.asn_db_path.as_deref());
+
     let mut ticker = tokio::time::interval(opts.interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -83,7 +87,7 @@ async fn run_with_model(
         ticker.tick().await;
 
         let input = DecisionInput {
-            snapshot: snapshot::build(&session),
+            snapshot: snapshot::build(&session, enricher.as_ref()),
         };
         let out = match model.decide(&input).await {
             Ok(o) => o,

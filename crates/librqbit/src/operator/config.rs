@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Configuration for the in-process AI operator.
@@ -19,6 +20,9 @@ pub struct OperatorOptions {
     pub model: ModelConfig,
     /// Upper bound on how many AUTO-tier actions may be executed in a single tick.
     pub max_auto_actions_per_tick: usize,
+    /// Optional path to a MaxMind GeoLite2-ASN `.mmdb` for peer ASN/org
+    /// enrichment. `None` disables enrichment (no-op).
+    pub asn_db_path: Option<PathBuf>,
 }
 
 impl Default for OperatorOptions {
@@ -29,6 +33,7 @@ impl Default for OperatorOptions {
             interval: Duration::from_secs(45),
             model: ModelConfig::default(),
             max_auto_actions_per_tick: 2,
+            asn_db_path: None,
         }
     }
 }

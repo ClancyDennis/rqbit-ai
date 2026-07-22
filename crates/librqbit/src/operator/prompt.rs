@@ -76,6 +76,7 @@ mod tests {
                 eta_seconds: None,
                 live_peers: 0,
                 dead_peers: 0,
+                top_peers: vec![],
             }],
         }
     }

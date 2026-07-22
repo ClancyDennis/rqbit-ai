@@ -153,6 +153,12 @@ struct Opts {
     )]
     operator_poll_interval_secs: u64,
 
+    /// Path to a MaxMind GeoLite2-ASN .mmdb for peer ASN/org enrichment
+    /// (optional; enables spotting hosting/monitoring peers).
+    #[cfg(feature = "operator")]
+    #[arg(long = "operator-asn-db", env = "RQBIT_OPERATOR_ASN_DB")]
+    operator_asn_db: Option<std::path::PathBuf>,
+
     /// Set this flag if you want to use tokio's single threaded runtime.
     /// It MAY perform better, but the main purpose is easier debugging, as time
     /// profilers work better with this one.
@@ -739,6 +745,7 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
                     request_timeout: std::time::Duration::from_secs(30),
                 },
                 max_auto_actions_per_tick: 2,
+                asn_db_path: opts.operator_asn_db.clone(),
             })
         } else {
             None

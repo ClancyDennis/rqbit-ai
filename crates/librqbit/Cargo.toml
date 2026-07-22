@@ -35,9 +35,9 @@ postgres = ["sqlx", "home"]
 async-bt = ["async-backtrace"]
 watch = ["notify"]
 disable-upload = []
-# In-process AI operator (optional supervisory loop). No extra deps: reuses
-# reqwest/serde_json/async-trait which are already non-optional.
-operator = []
+# In-process AI operator (optional supervisory loop). Pulls in maxminddb for
+# optional peer ASN/org enrichment; the rest reuses already-present deps.
+operator = ["dep:maxminddb"]
 
 # These are absolutely useless for people, just for debugging / testing / benchmarking
 _disable_disk_write_net_benchmark = []
@@ -115,6 +115,7 @@ socket2.workspace = true
 nix = { workspace = true, features = ["uio"] }
 thiserror.workspace = true
 subtle = { workspace = true, optional = true }
+maxminddb = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32", "Win32_System", "Win32_System_IO", "Win32_System_Ioctl"] }
