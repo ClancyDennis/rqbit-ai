@@ -1,9 +1,10 @@
 import { JSX, useState } from "react";
-import { BsBodyText, BsMoon, BsSliders2, BsSun } from "react-icons/bs";
+import { BsBodyText, BsMoon, BsRobot, BsSliders2, BsSun } from "react-icons/bs";
 import { IconButton } from "./buttons/IconButton";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { DarkMode } from "../helper/darkMode";
 import { ConfigModal } from "./config/ConfigModal";
+import { OperatorModal } from "./modal/OperatorModal";
 
 interface SettingsButtonsProps {
   onLogsClick: () => void;
@@ -16,6 +17,7 @@ export const SettingsButtons: React.FC<SettingsButtonsProps> = ({
 }) => {
   const [isDark, setIsDark] = useState(DarkMode.isDark());
   const [configOpen, setConfigOpen] = useState(false);
+  const [operatorOpen, setOperatorOpen] = useState(false);
 
   const handleDarkModeToggle = () => {
     DarkMode.toggle();
@@ -42,6 +44,13 @@ export const SettingsButtons: React.FC<SettingsButtonsProps> = ({
           />
         </>
       )}
+      <IconButton onClick={() => setOperatorOpen(true)} title="AI operator">
+        <BsRobot />
+      </IconButton>
+      <OperatorModal
+        show={operatorOpen}
+        onClose={() => setOperatorOpen(false)}
+      />
       <IconButton onClick={onLogsClick} title="View logs">
         <BsBodyText />
       </IconButton>

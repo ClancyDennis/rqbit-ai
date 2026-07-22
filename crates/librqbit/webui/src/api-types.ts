@@ -249,6 +249,38 @@ export interface JSONLogLine {
   spans: Span[];
 }
 
+// AI operator types
+export type OperatorTier = "auto" | "notify" | "confirm";
+
+export interface OperatorDecision {
+  seq: number;
+  kind: string;
+  tier: OperatorTier;
+  torrent_idx: number | null;
+  rationale: string;
+  confidence: number | null;
+  outcome: string;
+}
+
+export interface OperatorConfirmation {
+  id: number;
+  kind: string;
+  torrent_idx: number | null;
+  rationale: string;
+}
+
+export interface OperatorDecisionsResponse {
+  decisions: OperatorDecision[];
+}
+
+export interface OperatorConfirmationsResponse {
+  confirmations: OperatorConfirmation[];
+}
+
+export interface OperatorActionResponse {
+  status: string;
+}
+
 export interface RqbitAPI {
   getPlaylistUrl: (index: number) => string | null;
   getStreamLogsUrl: () => string | null;
@@ -277,4 +309,8 @@ export interface RqbitAPI {
   stats: () => Promise<SessionStats>;
   getLimits: () => Promise<LimitsConfig>;
   setLimits: (limits: LimitsConfig) => Promise<void>;
+  getOperatorDecisions: () => Promise<OperatorDecisionsResponse>;
+  getOperatorConfirmations: () => Promise<OperatorConfirmationsResponse>;
+  operatorApprove: (id: number) => Promise<OperatorActionResponse>;
+  operatorReject: (id: number) => Promise<OperatorActionResponse>;
 }
