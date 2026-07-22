@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import { APIContext } from "../../context";
 import {
+  OperatorConfig,
   OperatorConfirmation,
   OperatorDecision,
   OperatorTier,
@@ -11,6 +12,8 @@ import { ModalBody } from "./ModalBody";
 import { ModalFooter } from "./ModalFooter";
 import { Button } from "../buttons/Button";
 import { Spinner } from "../Spinner";
+import { FormInput } from "../forms/FormInput";
+import { FormCheckbox } from "../forms/FormCheckbox";
 
 interface Props {
   show: boolean;
@@ -31,6 +34,18 @@ const TierBadge: React.FC<{ tier: OperatorTier }> = ({ tier }) => (
     }`}
   >
     {tier}
+  </span>
+);
+
+const RunningBadge: React.FC<{ running: boolean }> = ({ running }) => (
+  <span
+    className={`inline-block rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${
+      running
+        ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+        : "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200"
+    }`}
+  >
+    {running ? "running" : "not running"}
   </span>
 );
 
@@ -105,6 +120,11 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  const [config, setConfig] = useState<OperatorConfig | null>(null);
+  const [running, setRunning] = useState<boolean>(false);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+
   const refresh = async () => {
     try {
       const [d, c] = await Promise.all([
@@ -130,6 +150,48 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
       return 5000;
     }, 0);
   }, [show]);
+
+  // Load the operator config once when the modal opens.
+  useEffect(() => {
+    if (!show) {
+      return;
+    }
+    setSaveNote(null);
+    API.getOperatorConfig()
+      .then((r) => {
+        setConfig(r.config);
+        setRunning(r.running);
+      })
+      .catch((e: any) => {
+        setError(e?.text ? String(e.text) : "Failed to load operator config");
+        console.error(e);
+      });
+  }, [show]);
+
+  const updateConfig = <K extends keyof OperatorConfig>(
+    key: K,
+    value: OperatorConfig[K],
+  ) => {
+    setConfig((prev) => (prev === null ? prev : { ...prev, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    if (config === null) {
+      return;
+    }
+    setSaving(true);
+    setSaveNote(null);
+    try {
+      const r = await API.setOperatorConfig(config);
+      setSaveNote(r.note);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.text ? String(e.text) : "Failed to save operator config");
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleApprove = async (id: number) => {
     setBusyId(id);
@@ -201,6 +263,102 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
                 <DecisionRow key={d.seq} decision={d} />
               ))}
             </div>
+          )}
+        </section>
+
+        <section className="mt-5">
+          <div className="mb-2 flex items-center gap-2">
+            <h3 className="text-lg font-semibold">Settings</h3>
+            <RunningBadge running={running} />
+          </div>
+          {config === null ? (
+            <Spinner label="Loading" />
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSave();
+              }}
+              className="flex flex-col gap-3"
+            >
+              <FormCheckbox
+                name="operator-enabled"
+                label="Enabled"
+                help="Turn the AI operator on or off."
+                checked={config.enabled}
+                onChange={(e) => updateConfig("enabled", e.target.checked)}
+              />
+              <FormCheckbox
+                name="operator-live"
+                label="Live (apply actions)"
+                help="When on, the operator takes real actions on your torrents instead of only simulating them. Leave off to keep it in a safe dry-run mode."
+                checked={!config.dry_run}
+                onChange={(e) => updateConfig("dry_run", !e.target.checked)}
+              />
+              {!config.dry_run && (
+                <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  Live mode lets the operator take actions (pause, recheck,
+                  delete, adjust limits) on your behalf.
+                </div>
+              )}
+              <FormInput
+                name="operator-base-url"
+                label="Base URL"
+                inputType="text"
+                placeholder="http://localhost:4000"
+                value={config.base_url}
+                onChange={(e) => updateConfig("base_url", e.target.value)}
+              />
+              <FormInput
+                name="operator-model"
+                label="Model"
+                inputType="text"
+                placeholder="gpt-5.6-luna-global"
+                value={config.model}
+                onChange={(e) => updateConfig("model", e.target.value)}
+              />
+              <FormInput
+                name="operator-poll-interval"
+                label="Poll interval (seconds)"
+                inputType="number"
+                value={String(config.poll_interval_secs)}
+                onChange={(e) =>
+                  updateConfig(
+                    "poll_interval_secs",
+                    Math.max(1, Number(e.target.value) || 1),
+                  )
+                }
+              />
+              <FormInput
+                name="operator-asn-db-path"
+                label="ASN database path (optional)"
+                inputType="text"
+                placeholder="/path/to/asn.mmdb"
+                value={config.asn_db_path ?? ""}
+                onChange={(e) =>
+                  updateConfig(
+                    "asn_db_path",
+                    e.target.value === "" ? null : e.target.value,
+                  )
+                }
+              />
+              <p className="text-sm text-secondary">
+                API key is read from the RQBIT_OPERATOR_API_KEY environment
+                variable.
+              </p>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="primary"
+                  disabled={saving}
+                  onClick={handleSave}
+                >
+                  Save
+                </Button>
+                {saveNote && (
+                  <span className="text-sm text-secondary">{saveNote}</span>
+                )}
+              </div>
+            </form>
           )}
         </section>
       </ModalBody>

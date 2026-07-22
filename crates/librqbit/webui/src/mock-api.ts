@@ -6,6 +6,8 @@ import {
   LimitsConfig,
   ListTorrentsResponse,
   OperatorActionResponse,
+  OperatorConfig,
+  OperatorConfigResponse,
   OperatorConfirmation,
   OperatorConfirmationsResponse,
   OperatorDecision,
@@ -453,6 +455,15 @@ const mockConfirmations: OperatorConfirmation[] = [
   },
 ];
 
+let mockOperatorConfig: OperatorConfig = {
+  enabled: false,
+  dry_run: true,
+  poll_interval_secs: 30,
+  base_url: "http://localhost:4000",
+  model: "gpt-5.6-luna-global",
+  asn_db_path: null,
+};
+
 function resolveMockConfirmation(id: number, outcome: string): void {
   const idx = mockConfirmations.findIndex((c) => c.id === id);
   if (idx === -1) return;
@@ -702,5 +713,18 @@ export const MockAPI: RqbitAPI & { getVersion: () => Promise<string> } = {
     await new Promise((r) => setTimeout(r, 50));
     resolveMockConfirmation(id, "rejected");
     return { status: "rejected" };
+  },
+
+  getOperatorConfig: async (): Promise<OperatorConfigResponse> => {
+    await new Promise((r) => setTimeout(r, 30));
+    return { config: { ...mockOperatorConfig }, running: false };
+  },
+
+  setOperatorConfig: async (
+    config: OperatorConfig,
+  ): Promise<{ status: string; note: string }> => {
+    await new Promise((r) => setTimeout(r, 50));
+    mockOperatorConfig = { ...config };
+    return { status: "ok", note: "restart rqbit to apply" };
   },
 };

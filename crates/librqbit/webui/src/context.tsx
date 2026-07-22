@@ -2,6 +2,8 @@ import { createContext } from "react";
 import {
   LimitsConfig,
   OperatorActionResponse,
+  OperatorConfig,
+  OperatorConfigResponse,
   OperatorConfirmationsResponse,
   OperatorDecisionsResponse,
   RqbitAPI,
@@ -71,6 +73,14 @@ export const APIContext = createContext<RqbitAPI>({
     throw new Error("Function not implemented.");
   },
   operatorReject: function (id: number): Promise<OperatorActionResponse> {
+    throw new Error("Function not implemented.");
+  },
+  getOperatorConfig: function (): Promise<OperatorConfigResponse> {
+    throw new Error("Function not implemented.");
+  },
+  setOperatorConfig: function (
+    config: OperatorConfig,
+  ): Promise<{ status: string; note: string }> {
     throw new Error("Function not implemented.");
   },
 });

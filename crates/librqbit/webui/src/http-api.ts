@@ -4,6 +4,8 @@ import {
   LimitsConfig,
   ListTorrentsResponse,
   OperatorActionResponse,
+  OperatorConfig,
+  OperatorConfigResponse,
   OperatorConfirmationsResponse,
   OperatorDecisionsResponse,
   PeerStatsSnapshot,
@@ -218,5 +220,13 @@ export const API: RqbitAPI & { getVersion: () => Promise<string> } = {
   },
   operatorReject: (id: number): Promise<OperatorActionResponse> => {
     return makeRequest("POST", `/operator/confirmations/${id}/reject`);
+  },
+  getOperatorConfig: (): Promise<OperatorConfigResponse> => {
+    return makeRequest("GET", "/operator/config");
+  },
+  setOperatorConfig: (
+    config: OperatorConfig,
+  ): Promise<{ status: string; note: string }> => {
+    return makeRequest("POST", "/operator/config", config, true);
   },
 };

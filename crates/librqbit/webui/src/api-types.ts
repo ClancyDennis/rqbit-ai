@@ -281,6 +281,20 @@ export interface OperatorActionResponse {
   status: string;
 }
 
+export interface OperatorConfig {
+  enabled: boolean;
+  dry_run: boolean;
+  poll_interval_secs: number;
+  base_url: string;
+  model: string;
+  asn_db_path: string | null;
+}
+
+export interface OperatorConfigResponse {
+  config: OperatorConfig;
+  running: boolean;
+}
+
 export interface RqbitAPI {
   getPlaylistUrl: (index: number) => string | null;
   getStreamLogsUrl: () => string | null;
@@ -313,4 +327,8 @@ export interface RqbitAPI {
   getOperatorConfirmations: () => Promise<OperatorConfirmationsResponse>;
   operatorApprove: (id: number) => Promise<OperatorActionResponse>;
   operatorReject: (id: number) => Promise<OperatorActionResponse>;
+  getOperatorConfig: () => Promise<OperatorConfigResponse>;
+  setOperatorConfig: (
+    config: OperatorConfig,
+  ) => Promise<{ status: string; note: string }>;
 }
