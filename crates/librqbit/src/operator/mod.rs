@@ -42,7 +42,7 @@ pub use persist::{
 };
 
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::Session;
 use model_openai::OpenAiCompatModel;
@@ -106,8 +106,14 @@ async fn run_with_model(
                 continue;
             }
         };
+        // Per-tick heartbeat so it's visibly alive even when idle.
+        info!(
+            torrents = input.snapshot.torrents.len(),
+            proposed = out.decisions.len(),
+            dry_run = opts.dry_run,
+            "operator tick"
+        );
         if out.decisions.is_empty() {
-            debug!("operator: no suggestions this tick");
             continue;
         }
 

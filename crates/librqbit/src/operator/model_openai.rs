@@ -80,6 +80,9 @@ impl OperatorModel for OpenAiCompatModel {
             .map(|c| c.message.content.as_str())
             .unwrap_or("");
 
+        // Visible at RUST_LOG=...operator=debug so you can see exactly what the
+        // model returned each tick (including empty/"no action" responses).
+        tracing::debug!(raw_response = %content, "operator: model response");
         Ok(parse_model_content(content))
     }
 }
