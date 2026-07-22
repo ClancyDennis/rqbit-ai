@@ -129,7 +129,10 @@ Flags (all also settable via `RQBIT_OPERATOR_*` env vars):
   each peer in the snapshot is enriched with its ASN and owning organization,
   letting the operator spot hosting/monitoring-range peers. Purely offline; no
   lookups happen on the connection path.
-- `RQBIT_OPERATOR_API_KEY` — bearer token for the endpoint (env only, not a flag).
+- `RQBIT_OPERATOR_API_KEY` — bearer token for the endpoint (env only, never a
+  flag and never stored). Falls back to `OPENAI_API_KEY` if unset. rqbit (and
+  the desktop app) load a `.env` from the working directory at startup, so you
+  can keep the key in a file instead of exporting it.
 
 Actions the operator can currently take (all tier-gated as above):
 - Auto (may run automatically, subject to cooldowns): pause/resume, global and

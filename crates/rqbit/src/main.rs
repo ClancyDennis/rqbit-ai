@@ -527,6 +527,9 @@ fn api_socket_from_systemd() -> anyhow::Result<Option<TcpListener>> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Load a .env (from cwd upward) before reading env-backed CLI args, so
+    // e.g. RQBIT_OPERATOR_API_KEY / OPENAI_API_KEY can live in a file.
+    let _ = dotenvy::dotenv();
     let opts = Opts::parse();
 
     if let SubCommand::Completions(completions_opts) = &opts.subcommand {
@@ -744,7 +747,7 @@ async fn async_main(mut opts: Opts, cancel: CancellationToken) -> anyhow::Result
                 model: librqbit::operator::ModelConfig {
                     base_url: opts.operator_base_url.clone().unwrap_or_default(),
                     model: opts.operator_model.clone().unwrap_or_default(),
-                    api_key: std::env::var("RQBIT_OPERATOR_API_KEY").ok(),
+                    api_key: librqbit::operator::operator_api_key(),
                     request_timeout: std::time::Duration::from_secs(30),
                 },
                 max_auto_actions_per_tick: 2,

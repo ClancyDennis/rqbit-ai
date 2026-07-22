@@ -131,6 +131,9 @@ async fn api_from_config(
             ratelimits: config.ratelimits,
             #[cfg(feature = "disable-upload")]
             disable_upload: config.disable_upload,
+            // Operator config comes from the persisted file (edited in the UI);
+            // None until the user enables it. Restart-to-apply.
+            operator: librqbit::operator::load_persisted_config().map(|c| c.to_options()),
             ..Default::default()
         },
     )
@@ -458,6 +461,9 @@ async fn start() {
 }
 
 fn main() {
+    // Load a .env (from cwd upward) so RQBIT_OPERATOR_API_KEY / OPENAI_API_KEY
+    // (and other vars) can live in a file rather than the launch environment.
+    let _ = dotenvy::dotenv();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

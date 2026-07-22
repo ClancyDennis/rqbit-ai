@@ -23,11 +23,13 @@ librqbit = { workspace = true, features = [
     "webui",
     "upnp-serve-adapter",
     "prometheus",
+    "operator",
     "default-tls"
 
 ] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 anyhow.workspace = true
+dotenvy.workspace = true
 base64.workspace = true
 http.workspace = true
 directories.workspace = true

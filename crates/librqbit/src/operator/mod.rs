@@ -37,7 +37,8 @@ pub use model::{
     DecisionInput, DecisionOutput, EchoModel, NullModel, OperatorModel, SuggestedAction,
 };
 pub use persist::{
-    OperatorPersistedConfig, load as load_persisted_config, save as save_persisted_config,
+    OperatorPersistedConfig, load as load_persisted_config, operator_api_key,
+    save as save_persisted_config,
 };
 
 use std::sync::Arc;

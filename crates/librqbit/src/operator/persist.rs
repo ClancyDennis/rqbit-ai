@@ -11,6 +11,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::operator::config::{ModelConfig, OperatorOptions};
 
+/// The operator's model API key, read from the environment: `RQBIT_OPERATOR_API_KEY`,
+/// falling back to `OPENAI_API_KEY`. Populate it however you like (a `.env` is
+/// loaded at startup). Never persisted to disk or exposed over the API.
+pub fn operator_api_key() -> Option<String> {
+    std::env::var("RQBIT_OPERATOR_API_KEY")
+        .ok()
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+        .filter(|k| !k.is_empty())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorPersistedConfig {
     pub enabled: bool,
@@ -47,7 +57,7 @@ impl OperatorPersistedConfig {
             model: ModelConfig {
                 base_url: self.base_url.clone(),
                 model: self.model.clone(),
-                api_key: std::env::var("RQBIT_OPERATOR_API_KEY").ok(),
+                api_key: operator_api_key(),
                 request_timeout: std::time::Duration::from_secs(30),
             },
             max_auto_actions_per_tick: 2,
