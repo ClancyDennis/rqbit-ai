@@ -24,7 +24,9 @@ use url::Url;
 use crate::tracker_comms_http;
 use crate::tracker_comms_udp;
 use crate::tracker_comms_udp::UdpTrackerClient;
+use crate::tracker_stats::TrackerStatsRegistry;
 use librqbit_core::hash_id::Id20;
+use std::time::Instant;
 
 /// HTTP tracker responses are normally a few KiB. One MiB still permits over
 /// 170,000 compact IPv4 peers while bounding memory use from an untrusted
@@ -92,6 +94,7 @@ pub struct TrackerComms {
     announce_port: u16,
     reqwest_client: reqwest::Client,
     key: u32,
+    tracker_stats: Arc<TrackerStatsRegistry>,
 }
 
 #[derive(Default)]
@@ -205,6 +208,7 @@ impl TrackerComms {
         announce_port: u16,
         reqwest_client: reqwest::Client,
         udp_client: UdpTrackerClient,
+        tracker_stats: Arc<TrackerStatsRegistry>,
     ) -> Option<BoxStream<'static, SocketAddr>> {
         let trackers = trackers
             .into_iter()
@@ -237,6 +241,7 @@ impl TrackerComms {
                 announce_port,
                 reqwest_client,
                 key: rand::random(),
+                tracker_stats,
             });
             let mut futures = FuturesUnordered::new();
             for tracker in trackers {
@@ -305,7 +310,14 @@ impl TrackerComms {
                         .with_min_delay(Duration::from_secs(10))
                         .with_max_delay(Duration::from_secs(600)),
                 )
-                .notify(|err, retry_in| debug!(?retry_in, "error calling tracker: {err:#}"))
+                .notify(|err, retry_in| {
+                    self.tracker_stats.record_error(
+                        self.info_hash,
+                        tracker_url.as_str(),
+                        &format!("{err:#}"),
+                    );
+                    debug!(?retry_in, "error calling tracker: {err:#}")
+                })
                 .await
                 .context("this shouldn't fail")?;
 
@@ -346,6 +358,7 @@ impl TrackerComms {
         }
         url.set_query(Some(&queries));
 
+        let started = Instant::now();
         let response: reqwest::Response = self.reqwest_client.get(url).send().await?;
         if !response.status().is_success() {
             anyhow::bail!("tracker responded with {:?}", response.status());
@@ -366,9 +379,17 @@ impl TrackerComms {
             })?
             .0;
 
+        let mut num_peers = 0usize;
         for peer in response.iter_peers() {
             self.tx.send(peer).await?;
+            num_peers += 1;
         }
+        self.tracker_stats.record_success(
+            self.info_hash,
+            tracker_url.as_str(),
+            started.elapsed(),
+            num_peers,
+        );
         Ok(Duration::from_secs(
             response.min_interval.unwrap_or(response.interval),
         ))
@@ -417,7 +438,7 @@ impl TrackerComms {
             match addrs {
                 UdpTrackerResolveResult::One(addr) => {
                     match self
-                        .tracker_one_request_udp(addr, &client)
+                        .tracker_one_request_udp(&url, addr, &client)
                         .instrument(trace_span!("udp request", ?addr))
                         .await
                     {
@@ -429,9 +450,9 @@ impl TrackerComms {
                 }
                 UdpTrackerResolveResult::Two(v4, v6) => {
                     let (r4, r6) = tokio::join!(
-                        self.tracker_one_request_udp(v4.into(), &client)
+                        self.tracker_one_request_udp(&url, v4.into(), &client)
                             .instrument(trace_span!("udp request", addr=?v4)),
-                        self.tracker_one_request_udp(v6.into(), &client)
+                        self.tracker_one_request_udp(&url, v6.into(), &client)
                             .instrument(trace_span!("udp request", addr=?v6))
                     );
                     sleep_interval = Some(
@@ -447,6 +468,7 @@ impl TrackerComms {
 
     async fn tracker_one_request_udp(
         &self,
+        tracker_url: &Url,
         addr: SocketAddr,
         client: &UdpTrackerClient,
     ) -> anyhow::Result<Duration> {
@@ -475,17 +497,30 @@ impl TrackerComms {
             port: self.announce_port,
         };
 
+        let started = Instant::now();
         match client.announce(addr, request).await {
             Ok(response) => {
-                trace!(len = response.addrs.len(), "received announce response");
+                let num_peers = response.addrs.len();
+                trace!(len = num_peers, "received announce response");
                 for addr in response.addrs {
                     self.tx.send(addr).await.context("rx closed")?;
                 }
+                self.tracker_stats.record_success(
+                    self.info_hash,
+                    tracker_url.as_str(),
+                    started.elapsed(),
+                    num_peers,
+                );
                 let sleep = response.interval.max(5);
                 let sleep = Duration::from_secs(sleep as u64);
                 Ok(sleep)
             }
             Err(e) => {
+                self.tracker_stats.record_error(
+                    self.info_hash,
+                    tracker_url.as_str(),
+                    &format!("{e:#}"),
+                );
                 debug!(?addr, "error reading announce response: {e:#}");
                 Err(e)
             }

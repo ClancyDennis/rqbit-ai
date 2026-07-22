@@ -71,7 +71,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{Instrument, debug, debug_span, error, info, trace, warn};
-use tracker_comms::{TrackerComms, UdpTrackerClient};
+use tracker_comms::{TrackerComms, TrackerStatsRegistry, UdpTrackerClient};
 
 pub const SUPPORTED_SCHEMES: [&str; 3] = ["http:", "https:", "magnet:"];
 
@@ -142,6 +142,7 @@ pub struct Session {
     pub(crate) connector: Arc<StreamConnector>,
     reqwest_client: reqwest::Client,
     udp_tracker_client: UdpTrackerClient,
+    tracker_stats: Arc<TrackerStatsRegistry>,
     disable_trackers: bool,
 
     // Lifecycle management
@@ -864,6 +865,7 @@ impl Session {
                     opts.concurrent_init_limit.unwrap_or(3),
                 )),
                 udp_tracker_client,
+                tracker_stats: Arc::new(TrackerStatsRegistry::default()),
                 ratelimits: Limits::new(opts.ratelimits),
                 ipv4_only: opts.ipv4_only,
                 trackers: opts.trackers,
@@ -1105,6 +1107,12 @@ impl Session {
     #[cfg(feature = "operator")]
     pub(crate) fn reqwest_client(&self) -> reqwest::Client {
         self.reqwest_client.clone()
+    }
+
+    /// Per-tracker health registry, populated by the announce loops.
+    #[cfg(feature = "operator")]
+    pub(crate) fn tracker_stats(&self) -> &Arc<TrackerStatsRegistry> {
+        &self.tracker_stats
     }
 
     fn merge_peer_opts(&self, other: Option<PeerConnectionOptions>) -> PeerConnectionOptions {
@@ -1654,6 +1662,7 @@ impl Session {
             self.announce_port().unwrap_or(4240),
             self.reqwest_client.clone(),
             self.udp_tracker_client.clone(),
+            self.tracker_stats.clone(),
         );
 
         let initial_peers_rx = if initial_peers.is_empty() {

@@ -77,6 +77,7 @@ mod tests {
                 live_peers: 0,
                 dead_peers: 0,
                 top_peers: vec![],
+                trackers: vec![],
             }],
         }
     }

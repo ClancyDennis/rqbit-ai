@@ -9,6 +9,8 @@ use std::net::SocketAddr;
 
 use serde::Serialize;
 
+use tracker_comms::{TrackerStat, TrackerStatsRegistry};
+
 use crate::operator::enrich::PeerEnricher;
 use crate::torrent_state::live::peer::stats::snapshot::{PeerStatsFilter, PeerStatsFilterState};
 use crate::{ManagedTorrent, Session};
@@ -107,6 +109,8 @@ pub struct TorrentSummary {
     pub dead_peers: u32,
     /// Most-active peers (capped), enriched with ASN/org where available.
     pub top_peers: Vec<PeerDetail>,
+    /// Per-tracker health (status, latency, peers yielded, errors).
+    pub trackers: Vec<TrackerStat>,
 }
 
 /// Build a snapshot from the current session state. Cheap: only reads existing
@@ -122,10 +126,13 @@ pub fn build(session: &Session, enricher: &dyn PeerEnricher) -> Snapshot {
         }
     });
 
+    let tracker_stats = session.tracker_stats();
     // stats()/is_paused()/per_peer_stats_snapshot() do not await, so it is safe
     // to build summaries directly inside the with_torrents closure.
-    let torrents =
-        session.with_torrents(|it| it.map(|(id, h)| torrent_summary(id, h, enricher)).collect());
+    let torrents = session.with_torrents(|it| {
+        it.map(|(id, h)| torrent_summary(id, h, enricher, tracker_stats))
+            .collect()
+    });
 
     Snapshot {
         schema_version: 2,
@@ -151,7 +158,12 @@ pub fn build(session: &Session, enricher: &dyn PeerEnricher) -> Snapshot {
     }
 }
 
-fn torrent_summary(idx: usize, h: &ManagedTorrent, enricher: &dyn PeerEnricher) -> TorrentSummary {
+fn torrent_summary(
+    idx: usize,
+    h: &ManagedTorrent,
+    enricher: &dyn PeerEnricher,
+    tracker_stats: &TrackerStatsRegistry,
+) -> TorrentSummary {
     let st = h.stats();
     let (download_mbps, upload_mbps, eta_seconds, live_peers, dead_peers) = match &st.live {
         Some(l) => (
@@ -223,5 +235,6 @@ fn torrent_summary(idx: usize, h: &ManagedTorrent, enricher: &dyn PeerEnricher) 
         live_peers,
         dead_peers,
         top_peers,
+        trackers: tracker_stats.snapshot_for(h.info_hash()),
     }
 }
