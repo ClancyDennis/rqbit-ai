@@ -152,6 +152,22 @@ Safety model:
 - Untrusted torrent/peer text is passed to the model strictly as data, never as
   instructions.
 
+### Configuring and monitoring from the Web UI
+
+The web UI (and the Tauri desktop app) has an operator panel (robot icon in the
+header) with three sections:
+
+- **Settings** — enable/disable, toggle live vs dry-run, set the endpoint URL,
+  model, poll interval and ASN db path. Saved settings persist and take effect
+  on the next restart; the API key is **not** editable here (it stays in
+  `RQBIT_OPERATOR_API_KEY`).
+- **Pending confirmations** — approve/reject destructive or human-gated actions
+  (delete, forget, ban-peer) the operator has proposed.
+- **Recent decisions** — a live feed of what the operator decided and the
+  outcome.
+
+The same data is available over the HTTP API under `/operator/*`.
+
 ## Systemd socket activation
 
 rqbit can be started on-demand via [systemd socket activation](https://0pointer.de/blog/projects/socket-activation.html) by installing the [service and socket systemd units](systemd) into `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user`) and customizing them to your needs. If the associated [`rqbit.conf`](systemd/rqbit.conf) file is installed in `$XDG_CONFIG_HOME/rqbit/rqbit.conf` (`~/.config/rqbit/rqbit.conf`), it will be used to configure `rqbit` when started via the provided systemd unit.
