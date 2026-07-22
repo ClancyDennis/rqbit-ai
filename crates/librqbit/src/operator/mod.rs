@@ -96,9 +96,20 @@ async fn run_with_model(
     loop {
         ticker.tick().await;
 
-        let input = DecisionInput {
-            snapshot: snapshot::build(&session, enricher.as_ref()),
-        };
+        let snapshot = snapshot::build(&session, enricher.as_ref());
+        let n_torrents = snapshot.torrents.len();
+        let n_active = snapshot.torrents.iter().filter(|t| !t.paused).count();
+        // Nothing to supervise: skip the model call entirely (no torrents, or
+        // all paused/stopped). Still wakes on the timer to re-check cheaply.
+        if n_active == 0 {
+            info!(
+                torrents = n_torrents,
+                "operator idle (no active torrents); skipping model call"
+            );
+            continue;
+        }
+
+        let input = DecisionInput { snapshot };
         let out = match model.decide(&input).await {
             Ok(o) => o,
             Err(e) => {
@@ -106,9 +117,10 @@ async fn run_with_model(
                 continue;
             }
         };
-        // Per-tick heartbeat so it's visibly alive even when idle.
+        // Per-tick heartbeat so it's visibly alive.
         info!(
-            torrents = input.snapshot.torrents.len(),
+            torrents = n_torrents,
+            active = n_active,
             proposed = out.decisions.len(),
             dry_run = opts.dry_run,
             "operator tick"
