@@ -102,11 +102,13 @@ impl Action {
             | Action::ForceReannounce { .. } => ActionTier::Auto,
             Action::UpdateOnlyFiles { .. }
             | Action::RecheckFiles { .. }
-            | Action::AddTracker { .. }
-            | Action::BanPeer { .. } => ActionTier::Notify,
-            Action::ForgetTorrent { .. } | Action::DeleteTorrentWithFiles { .. } => {
-                ActionTier::Confirm
-            }
+            | Action::AddTracker { .. } => ActionTier::Notify,
+            // Banning a peer is implemented but human-gated: proposed by the
+            // operator, applied only on explicit confirmation (no auto-cut,
+            // no un-ban lever yet).
+            Action::BanPeer { .. }
+            | Action::ForgetTorrent { .. }
+            | Action::DeleteTorrentWithFiles { .. } => ActionTier::Confirm,
         }
     }
 
@@ -309,12 +311,17 @@ mod tests {
             .tier(),
             ActionTier::Notify
         );
+    }
+
+    #[test]
+    fn ban_peer_is_confirm_tier() {
+        // Human-gated: applied only via explicit confirmation.
         assert_eq!(
             Action::BanPeer {
                 addr: "1.2.3.4:6881".to_string()
             }
             .tier(),
-            ActionTier::Notify
+            ActionTier::Confirm
         );
     }
 

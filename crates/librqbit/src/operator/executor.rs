@@ -47,12 +47,17 @@ pub async fn execute(session: &Arc<Session>, action: &Action) -> anyhow::Result<
             let h = resolve(session, *idx)?;
             session.force_reannounce(h.info_hash())?;
         }
+        Action::BanPeer { addr } => {
+            let sa: std::net::SocketAddr = addr
+                .parse()
+                .with_context(|| format!("invalid peer address {addr:?}"))?;
+            session.ban_peer(sa);
+        }
         // Stubbed levers: the Action variant, tier, and mapping exist so the
         // operator can propose them and they are correctly gated, but the
         // engine command they map to does not exist yet. Each requires
-        // non-trivial core plumbing (see the task report) that would touch
-        // restricted crates or the connection/data plane, so we fail-closed
-        // rather than force an unsafe implementation.
+        // non-trivial core plumbing that would touch restricted crates or the
+        // data plane, so we fail-closed rather than force an unsafe impl.
         Action::RecheckFiles { .. } => {
             anyhow::bail!(
                 "recheck_files not yet implemented: needs an in-place re-verify hook \
@@ -63,12 +68,6 @@ pub async fn execute(session: &Arc<Session>, action: &Action) -> anyhow::Result<
             anyhow::bail!(
                 "add_tracker not yet implemented: needs runtime tracker registration \
                  on a live TrackerComms handle (tracker_comms crate; no handle is stored today)"
-            );
-        }
-        Action::BanPeer { .. } => {
-            anyhow::bail!(
-                "ban_peer not yet implemented: needs a mutable session ban-set consulted \
-                 in the connection-accept path (connection plane)"
             );
         }
         Action::ForgetTorrent { idx } => {

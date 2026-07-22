@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     io::Read,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     num::NonZeroU32,
     path::{Component, Path, PathBuf},
     sync::{
@@ -171,6 +171,9 @@ pub struct Session {
 
     pub blocklist: IpRanges,
     pub allowlist: Option<IpRanges>,
+    /// Runtime-mutable set of banned peer IPs (in addition to the static
+    /// blocklist), consulted on every incoming/outgoing connection.
+    banned_peers: RwLock<HashSet<IpAddr>>,
 
     // Monitoring / tracing / logging
     pub(crate) stats: Arc<SessionStats>,
@@ -892,6 +895,7 @@ impl Session {
                 _disable_upload: opts.disable_upload,
                 blocklist,
                 allowlist,
+                banned_peers: Default::default(),
                 lsd,
             });
 
@@ -1008,12 +1012,12 @@ impl Session {
             .unwrap_or_else(|| Duration::from_secs(10));
 
         let incoming_ip = addr.ip();
-        if self.blocklist.has(incoming_ip) {
+        if self.blocklist.has(incoming_ip) || self.is_ip_banned(incoming_ip) {
             self.stats
                 .counters
                 .blocked_incoming
                 .fetch_add(1, Ordering::Relaxed);
-            bail!("Incoming ip {incoming_ip} is in blocklist");
+            bail!("Incoming ip {incoming_ip} is blocked");
         }
         if self.allowlist.as_ref().is_some_and(|l| !l.has(incoming_ip)) {
             self.stats
@@ -1135,6 +1139,18 @@ impl Session {
     #[cfg(all(feature = "operator", feature = "http-api"))]
     pub(crate) fn operator_handle(&self) -> Option<&Arc<crate::operator::OperatorHandle>> {
         self.operator_handle.as_ref()
+    }
+
+    /// Ban a peer by IP at runtime: blocks all future incoming and outgoing
+    /// connections to that address (in addition to the static blocklist). The
+    /// currently-open connection, if any, is not force-closed; it will be
+    /// refused on reconnect. Bans are cleared on restart.
+    pub fn ban_peer(&self, addr: SocketAddr) {
+        self.banned_peers.write().insert(addr.ip());
+    }
+
+    pub(crate) fn is_ip_banned(&self, ip: IpAddr) -> bool {
+        self.banned_peers.read().contains(&ip)
     }
 
     /// Ask all active tracker announce loops for this torrent to re-announce

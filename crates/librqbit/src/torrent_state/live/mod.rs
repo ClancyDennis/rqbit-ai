@@ -626,7 +626,7 @@ impl TorrentStateLive {
                 continue;
             }
 
-            if session.blocklist.has(addr.ip()) {
+            if session.blocklist.has(addr.ip()) || session.is_ip_banned(addr.ip()) {
                 session
                     .stats
                     .counters

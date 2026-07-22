@@ -131,11 +131,13 @@ Flags (all also settable via `RQBIT_OPERATOR_*` env vars):
   lookups happen on the connection path.
 - `RQBIT_OPERATOR_API_KEY` — bearer token for the endpoint (env only, not a flag).
 
-Actions the operator can currently take (all still tier-gated as above):
-pause/resume, global and per-torrent up/down rate limits (auto tier), and file
-selection (notify). Force-reannounce, recheck, add-tracker and peer-ban are
-recognized and gated but not yet wired to the engine — they are surfaced rather
-than executed.
+Actions the operator can currently take (all tier-gated as above):
+- Auto (may run automatically, subject to cooldowns): pause/resume, global and
+  per-torrent up/down rate limits, force-reannounce.
+- Notify (surfaced only): file selection.
+- Confirm (queued for explicit human approval): ban-peer, forget, delete-with-files.
+- Not yet wired to the engine (recognized/gated but no-op): recheck-files,
+  add-tracker.
 
 Safety model:
 
