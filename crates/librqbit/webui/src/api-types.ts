@@ -295,6 +295,16 @@ export interface OperatorConfigResponse {
   running: boolean;
 }
 
+export interface OperatorAssessment {
+  torrent_idx: number;
+  summary: string;
+  concern: string;
+}
+
+export interface OperatorAssessmentsResponse {
+  assessments: OperatorAssessment[];
+}
+
 export interface RqbitAPI {
   getPlaylistUrl: (index: number) => string | null;
   getStreamLogsUrl: () => string | null;
@@ -331,4 +341,5 @@ export interface RqbitAPI {
   setOperatorConfig: (
     config: OperatorConfig,
   ) => Promise<{ status: string; note: string }>;
+  getOperatorAssessments: () => Promise<OperatorAssessmentsResponse>;
 }

@@ -8,6 +8,7 @@ import {
   OperatorActionResponse,
   OperatorConfig,
   OperatorConfigResponse,
+  OperatorAssessmentsResponse,
   OperatorConfirmation,
   OperatorConfirmationsResponse,
   OperatorDecision,
@@ -726,5 +727,17 @@ export const MockAPI: RqbitAPI & { getVersion: () => Promise<string> } = {
     await new Promise((r) => setTimeout(r, 50));
     mockOperatorConfig = { ...config };
     return { status: "ok", note: "restart rqbit to apply" };
+  },
+  getOperatorAssessments: async (): Promise<OperatorAssessmentsResponse> => {
+    await new Promise((r) => setTimeout(r, 30));
+    return {
+      assessments: [
+        {
+          torrent_idx: 0,
+          summary: "downloading well, 15 peers, healthy trackers",
+          concern: "none",
+        },
+      ],
+    };
   },
 };

@@ -53,6 +53,18 @@ pub async fn h_operator_confirm(
     Ok(axum::Json(serde_json::json!({ "status": status })))
 }
 
+/// GET /operator/assessments — the operator's latest per-torrent opinion,
+/// including "no action" notes. Empty when the operator is not enabled.
+pub async fn h_operator_assessments(State(state): State<ApiState>) -> impl IntoResponse {
+    let assessments = state
+        .api
+        .session()
+        .operator_handle()
+        .map(|h| h.assessments())
+        .unwrap_or_default();
+    axum::Json(serde_json::json!({ "assessments": assessments }))
+}
+
 /// GET /operator/config — the editable operator config (never the API key),
 /// plus whether a loop is currently running.
 pub async fn h_operator_config(State(state): State<ApiState>) -> impl IntoResponse {

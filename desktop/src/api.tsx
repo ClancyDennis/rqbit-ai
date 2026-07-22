@@ -14,6 +14,7 @@ import {
   OperatorActionResponse,
   OperatorConfig,
   OperatorConfigResponse,
+  OperatorAssessmentsResponse,
 } from "rqbit-webui/src/api-types";
 
 import { InvokeArgs, invoke } from "@tauri-apps/api/core";
@@ -191,5 +192,7 @@ export const makeAPI = (configuration: RqbitDesktopConfig): RqbitAPI => {
       invokeAPI<{ status: string; note: string }>("operator_config_set", {
         config,
       }),
+    getOperatorAssessments: () =>
+      invokeAPI<OperatorAssessmentsResponse>("operator_assessments"),
   };
 };

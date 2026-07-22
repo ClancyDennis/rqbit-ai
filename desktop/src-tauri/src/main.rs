@@ -457,6 +457,17 @@ async fn operator_confirm(
 }
 
 #[tauri::command]
+fn operator_assessments(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    let assessments = api
+        .session()
+        .operator_handle()
+        .map(|h| h.assessments())
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "assessments": assessments }))
+}
+
+#[tauri::command]
 fn operator_config(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
     let api = state.api()?;
     let running = api.session().operator_handle().and_then(|h| h.effective());
@@ -498,6 +509,7 @@ async fn start() {
             config_current,
             config_default,
             get_version,
+            operator_assessments,
             operator_config,
             operator_config_set,
             operator_confirm,

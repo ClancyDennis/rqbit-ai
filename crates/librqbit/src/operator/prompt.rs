@@ -56,9 +56,15 @@ Be conservative: prefer inaction. Only act when the state clearly warrants it, s
 "confidence" (0..1), and give a short factual "rationale". Do not repeat an action you proposed last
 cycle if the state has not changed.
 
+Also produce an `assessments` array: for EACH torrent in the snapshot (by torrent_idx), a one-line
+`summary` of its health and a `concern` of "none", "watch", or "problem" — ALWAYS, even when no
+action is warranted (e.g. summary "downloading well, 15 peers", concern "none"). Keep summaries short
+and factual.
+
 Respond with ONLY a JSON object of the form:
-{"decisions": [{"torrent_idx": <int|null>, "action": {"kind": "<string>", "params": {}}, "rationale": "<short>", "confidence": <0..1>}]}
-If nothing should be done, return {"decisions": []}. Do not include any prose outside the JSON."#;
+{"assessments": [{"torrent_idx": <int>, "summary": "<short>", "concern": "none|watch|problem"}],
+ "decisions": [{"torrent_idx": <int|null>, "action": {"kind": "<string>", "params": {}}, "rationale": "<short>", "confidence": <0..1>}]}
+If no action is needed, still return the assessments with "decisions": []. Output only JSON, no prose."#;
 
 /// Build the user message: the snapshot as JSON under `untrusted_observed_state`.
 pub fn build_user_message(snapshot: &Snapshot) -> anyhow::Result<String> {

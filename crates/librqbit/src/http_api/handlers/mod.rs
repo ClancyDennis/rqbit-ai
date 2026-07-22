@@ -117,6 +117,10 @@ pub fn make_api_router(state: ApiState) -> Router {
                 "/operator/confirmations",
                 get(operator::h_operator_confirmations),
             )
+            .route(
+                "/operator/assessments",
+                get(operator::h_operator_assessments),
+            )
             .route("/operator/config", get(operator::h_operator_config));
     }
 

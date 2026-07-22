@@ -2,7 +2,7 @@
 //! API). Holds a bounded log of recent decisions and the queue of destructive
 //! actions awaiting human confirmation.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -42,12 +42,22 @@ pub struct PendingConfirmationView {
     pub rationale: String,
 }
 
+/// The operator's latest opinion of a torrent (per-torrent "thoughts").
+#[derive(Clone, Serialize)]
+pub struct AssessmentRecord {
+    pub torrent_idx: usize,
+    pub summary: String,
+    pub concern: String,
+}
+
 #[derive(Default)]
 struct State {
     decisions: VecDeque<DecisionRecord>,
     pending: VecDeque<PendingConfirmation>,
     next_seq: u64,
     next_pending_id: u64,
+    /// Latest per-torrent assessment, keyed by torrent id.
+    assessments: HashMap<usize, AssessmentRecord>,
     /// Keyless snapshot of the config the running loop started with.
     effective: Option<crate::operator::persist::OperatorPersistedConfig>,
 }
@@ -107,6 +117,23 @@ impl OperatorHandle {
         let mut s = self.state.lock();
         let pos = s.pending.iter().position(|p| p.id == id)?;
         s.pending.remove(pos)
+    }
+
+    /// Record/replace the latest assessment for a torrent.
+    pub(crate) fn record_assessment(&self, torrent_idx: usize, summary: String, concern: String) {
+        self.state.lock().assessments.insert(
+            torrent_idx,
+            AssessmentRecord {
+                torrent_idx,
+                summary,
+                concern,
+            },
+        );
+    }
+
+    /// Latest per-torrent assessments.
+    pub fn assessments(&self) -> Vec<AssessmentRecord> {
+        self.state.lock().assessments.values().cloned().collect()
     }
 
     /// Recent decisions, most recent first.

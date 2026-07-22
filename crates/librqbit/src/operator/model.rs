@@ -12,6 +12,20 @@ pub struct DecisionInput {
 pub struct DecisionOutput {
     #[serde(default)]
     pub decisions: Vec<SuggestedAction>,
+    /// Per-torrent assessment, including "no action" notes.
+    #[serde(default)]
+    pub assessments: Vec<Assessment>,
+}
+
+/// The model's brief opinion of one torrent, whether or not it warrants action.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Assessment {
+    pub torrent_idx: usize,
+    #[serde(default)]
+    pub summary: String,
+    /// "none" | "watch" | "problem".
+    #[serde(default)]
+    pub concern: String,
 }
 
 /// A single action the model proposes. The action is intentionally loosely
@@ -64,6 +78,7 @@ impl OperatorModel for EchoModel {
     async fn decide(&self, _input: &DecisionInput) -> anyhow::Result<DecisionOutput> {
         Ok(DecisionOutput {
             decisions: self.decisions.clone(),
+            ..Default::default()
         })
     }
 }

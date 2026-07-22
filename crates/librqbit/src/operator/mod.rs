@@ -32,7 +32,7 @@ mod snapshot;
 
 pub use action::{Action, ActionTier};
 pub use config::{ModelConfig, OperatorOptions};
-pub use handle::{DecisionRecord, OperatorHandle, PendingConfirmationView};
+pub use handle::{AssessmentRecord, DecisionRecord, OperatorHandle, PendingConfirmationView};
 pub use model::{
     DecisionInput, DecisionOutput, EchoModel, NullModel, OperatorModel, SuggestedAction,
 };
@@ -125,6 +125,13 @@ async fn run_with_model(
             dry_run = opts.dry_run,
             "operator tick"
         );
+
+        // Per-torrent assessments (incl. "no action" notes) — recorded even
+        // when there are no decisions.
+        for a in &out.assessments {
+            handle.record_assessment(a.torrent_idx, a.summary.clone(), a.concern.clone());
+        }
+
         if out.decisions.is_empty() {
             continue;
         }
