@@ -2,7 +2,7 @@
 //! endpoint. Provider-agnostic; base URL, model id and key are all config.
 
 use anyhow::Context;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::operator::config::ModelConfig;
 use crate::operator::model::{DecisionInput, DecisionOutput, OperatorModel};
@@ -19,9 +19,30 @@ impl OpenAiCompatModel {
     }
 }
 
+/// Token accounting from the model response, for cost estimation.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TokenUsage {
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    #[serde(default)]
+    pub completion_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+}
+
+/// Full result of one model call: parsed output plus the raw content and token
+/// usage (for the evaluate-now test harness / cost estimation).
+pub(crate) struct Evaluation {
+    pub output: DecisionOutput,
+    pub raw: String,
+    pub usage: Option<TokenUsage>,
+}
+
 #[derive(Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<TokenUsage>,
 }
 
 #[derive(Deserialize)]
@@ -34,9 +55,9 @@ struct ChatMessage {
     content: String,
 }
 
-#[async_trait::async_trait]
-impl OperatorModel for OpenAiCompatModel {
-    async fn decide(&self, input: &DecisionInput) -> anyhow::Result<DecisionOutput> {
+impl OpenAiCompatModel {
+    /// Do one HTTP call, returning the raw message content and token usage.
+    async fn request(&self, input: &DecisionInput) -> anyhow::Result<(String, Option<TokenUsage>)> {
         let user = build_user_message(&input.snapshot)?;
         let url = format!(
             "{}/v1/chat/completions",
@@ -76,14 +97,33 @@ impl OperatorModel for OpenAiCompatModel {
             .context("error decoding model response envelope")?;
         let content = parsed
             .choices
-            .first()
-            .map(|c| c.message.content.as_str())
-            .unwrap_or("");
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default();
+        Ok((content, parsed.usage))
+    }
 
+    /// One call returning parsed output + raw content + usage (no side effects).
+    /// Used by the evaluate-now endpoint.
+    pub(crate) async fn evaluate(&self, input: &DecisionInput) -> anyhow::Result<Evaluation> {
+        let (raw, usage) = self.request(input).await?;
+        Ok(Evaluation {
+            output: parse_model_content(&raw),
+            raw,
+            usage,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl OperatorModel for OpenAiCompatModel {
+    async fn decide(&self, input: &DecisionInput) -> anyhow::Result<DecisionOutput> {
+        let (content, _usage) = self.request(input).await?;
         // Visible at RUST_LOG=...operator=debug so you can see exactly what the
         // model returned each tick (including empty/"no action" responses).
         tracing::debug!(raw_response = %content, "operator: model response");
-        Ok(parse_model_content(content))
+        Ok(parse_model_content(&content))
     }
 }
 

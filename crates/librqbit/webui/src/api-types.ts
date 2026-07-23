@@ -305,6 +305,21 @@ export interface OperatorAssessmentsResponse {
   assessments: OperatorAssessment[];
 }
 
+export interface OperatorTokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface OperatorEvaluation {
+  torrents: number;
+  raw_response: string;
+  decisions: unknown[];
+  assessments: OperatorAssessment[];
+  usage: OperatorTokenUsage | null;
+  tokens_per_torrent: number;
+}
+
 export interface RqbitAPI {
   getPlaylistUrl: (index: number) => string | null;
   getStreamLogsUrl: () => string | null;
@@ -342,4 +357,6 @@ export interface RqbitAPI {
     config: OperatorConfig,
   ) => Promise<{ status: string; note: string }>;
   getOperatorAssessments: () => Promise<OperatorAssessmentsResponse>;
+  getOperatorSnapshot: () => Promise<unknown>;
+  operatorEvaluate: () => Promise<OperatorEvaluation>;
 }

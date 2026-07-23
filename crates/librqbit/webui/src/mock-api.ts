@@ -13,6 +13,7 @@ import {
   OperatorConfirmationsResponse,
   OperatorDecision,
   OperatorDecisionsResponse,
+  OperatorEvaluation,
   PeerStatsSnapshot,
   RqbitAPI,
   SessionStats,
@@ -738,6 +739,28 @@ export const MockAPI: RqbitAPI & { getVersion: () => Promise<string> } = {
           concern: "none",
         },
       ],
+    };
+  },
+  getOperatorSnapshot: async (): Promise<unknown> => {
+    await new Promise((r) => setTimeout(r, 30));
+    return { schema_version: 2, session: {}, torrents: [] };
+  },
+  operatorEvaluate: async (): Promise<OperatorEvaluation> => {
+    await new Promise((r) => setTimeout(r, 200));
+    return {
+      torrents: 1,
+      raw_response:
+        '{"assessments":[{"torrent_idx":0,"summary":"downloading well, 15 peers","concern":"none"}],"decisions":[]}',
+      decisions: [],
+      assessments: [
+        {
+          torrent_idx: 0,
+          summary: "downloading well, 15 peers",
+          concern: "none",
+        },
+      ],
+      usage: { prompt_tokens: 820, completion_tokens: 40, total_tokens: 860 },
+      tokens_per_torrent: 860,
     };
   },
 };

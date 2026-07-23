@@ -121,6 +121,7 @@ pub fn make_api_router(state: ApiState) -> Router {
                 "/operator/assessments",
                 get(operator::h_operator_assessments),
             )
+            .route("/operator/snapshot", get(operator::h_operator_snapshot))
             .route("/operator/config", get(operator::h_operator_config));
     }
 
@@ -161,7 +162,8 @@ pub fn make_api_router(state: ApiState) -> Router {
                     "/operator/confirmations/{id}/{decision}",
                     post(operator::h_operator_confirm),
                 )
-                .route("/operator/config", post(operator::h_operator_config_set));
+                .route("/operator/config", post(operator::h_operator_config_set))
+                .route("/operator/evaluate", post(operator::h_operator_evaluate));
         }
     }
 

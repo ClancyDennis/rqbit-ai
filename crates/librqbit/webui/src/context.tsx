@@ -7,6 +7,7 @@ import {
   OperatorAssessmentsResponse,
   OperatorConfirmationsResponse,
   OperatorDecisionsResponse,
+  OperatorEvaluation,
   RqbitAPI,
   SessionStats,
 } from "./api-types";
@@ -85,6 +86,12 @@ export const APIContext = createContext<RqbitAPI>({
     throw new Error("Function not implemented.");
   },
   getOperatorAssessments: function (): Promise<OperatorAssessmentsResponse> {
+    throw new Error("Function not implemented.");
+  },
+  getOperatorSnapshot: function (): Promise<unknown> {
+    throw new Error("Function not implemented.");
+  },
+  operatorEvaluate: function (): Promise<OperatorEvaluation> {
     throw new Error("Function not implemented.");
   },
 });

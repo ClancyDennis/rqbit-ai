@@ -9,6 +9,7 @@ import {
   OperatorConfigResponse,
   OperatorConfirmationsResponse,
   OperatorDecisionsResponse,
+  OperatorEvaluation,
   PeerStatsSnapshot,
   RqbitAPI,
   SessionStats,
@@ -232,5 +233,11 @@ export const API: RqbitAPI & { getVersion: () => Promise<string> } = {
   },
   getOperatorAssessments: (): Promise<OperatorAssessmentsResponse> => {
     return makeRequest("GET", "/operator/assessments");
+  },
+  getOperatorSnapshot: (): Promise<unknown> => {
+    return makeRequest("GET", "/operator/snapshot");
+  },
+  operatorEvaluate: (): Promise<OperatorEvaluation> => {
+    return makeRequest("POST", "/operator/evaluate");
   },
 };

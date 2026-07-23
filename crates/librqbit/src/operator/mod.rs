@@ -210,6 +210,45 @@ pub async fn confirm(
     }
 }
 
+/// The current snapshot as JSON — exactly what the model would be fed this
+/// instant (uses the configured ASN enricher). For inspection / test harness.
+pub fn snapshot_json(session: &Arc<Session>) -> serde_json::Value {
+    let cfg = persist::load().unwrap_or_default();
+    let enricher = enrich::build_enricher(cfg.asn_db_path.as_deref().map(std::path::Path::new));
+    serde_json::to_value(snapshot::build(session, enricher.as_ref())).unwrap_or_default()
+}
+
+/// Run ONE decision against the configured model right now and return the raw
+/// response, parsed decisions/assessments, and token usage — executing nothing.
+/// Lets you A/B different models on the current state (and estimate cost).
+pub async fn evaluate_once(session: &Arc<Session>) -> anyhow::Result<serde_json::Value> {
+    let cfg = persist::load().unwrap_or_default();
+    if cfg.base_url.is_empty() || cfg.model.is_empty() {
+        anyhow::bail!(
+            "operator model is not configured; set a base URL and model in Settings, save, then evaluate"
+        );
+    }
+    let enricher = enrich::build_enricher(cfg.asn_db_path.as_deref().map(std::path::Path::new));
+    let snapshot = snapshot::build(session, enricher.as_ref());
+    let torrents = snapshot.torrents.len();
+    let model = OpenAiCompatModel::new(session.reqwest_client(), cfg.to_options().model);
+    let ev = model.evaluate(&DecisionInput { snapshot }).await?;
+    let total = ev.usage.as_ref().map(|u| u.total_tokens).unwrap_or(0);
+    let tokens_per_torrent = if torrents > 0 {
+        total as f64 / torrents as f64
+    } else {
+        0.0
+    };
+    Ok(serde_json::json!({
+        "torrents": torrents,
+        "raw_response": ev.raw,
+        "decisions": ev.output.decisions,
+        "assessments": ev.output.assessments,
+        "usage": ev.usage,
+        "tokens_per_torrent": tokens_per_torrent,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

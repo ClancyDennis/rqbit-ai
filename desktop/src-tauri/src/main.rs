@@ -468,6 +468,17 @@ fn operator_assessments(state: tauri::State<State>) -> Result<serde_json::Value,
 }
 
 #[tauri::command]
+fn operator_snapshot(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
+    Ok(librqbit::operator::snapshot_json(state.api()?.session()))
+}
+
+#[tauri::command]
+async fn operator_evaluate(state: tauri::State<'_, State>) -> Result<serde_json::Value, ApiError> {
+    let api = state.api()?;
+    Ok(librqbit::operator::evaluate_once(api.session()).await?)
+}
+
+#[tauri::command]
 fn operator_config(state: tauri::State<State>) -> Result<serde_json::Value, ApiError> {
     let api = state.api()?;
     let running = api.session().operator_handle().and_then(|h| h.effective());
@@ -512,6 +523,8 @@ async fn start() {
             operator_assessments,
             operator_config,
             operator_config_set,
+            operator_evaluate,
+            operator_snapshot,
             operator_confirm,
             operator_confirmations,
             operator_decisions,

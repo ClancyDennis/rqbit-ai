@@ -53,6 +53,21 @@ pub async fn h_operator_confirm(
     Ok(axum::Json(serde_json::json!({ "status": status })))
 }
 
+/// GET /operator/snapshot — the exact state JSON the model would be fed now.
+pub async fn h_operator_snapshot(State(state): State<ApiState>) -> impl IntoResponse {
+    axum::Json(crate::operator::snapshot_json(state.api.session()))
+}
+
+/// POST /operator/evaluate — run one decision against the configured model now
+/// and return raw output + parsed decisions/assessments + token usage. Executes
+/// nothing (test harness for comparing models / estimating cost).
+pub async fn h_operator_evaluate(State(state): State<ApiState>) -> Result<impl IntoResponse> {
+    let out = crate::operator::evaluate_once(state.api.session())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(axum::Json(out))
+}
+
 /// GET /operator/assessments — the operator's latest per-torrent opinion,
 /// including "no action" notes. Empty when the operator is not enabled.
 pub async fn h_operator_assessments(State(state): State<ApiState>) -> impl IntoResponse {

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::operator::snapshot::Snapshot;
 
@@ -8,7 +8,7 @@ pub struct DecisionInput {
 }
 
 /// The model's response for a tick.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct DecisionOutput {
     #[serde(default)]
     pub decisions: Vec<SuggestedAction>,
@@ -18,7 +18,7 @@ pub struct DecisionOutput {
 }
 
 /// The model's brief opinion of one torrent, whether or not it warrants action.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Assessment {
     pub torrent_idx: usize,
     #[serde(default)]
@@ -31,7 +31,7 @@ pub struct Assessment {
 /// A single action the model proposes. The action is intentionally loosely
 /// typed here (a `kind` + free-form `params`); Stage C maps it to a strictly
 /// typed, tier-classified action before anything is ever executed.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SuggestedAction {
     #[serde(default)]
     pub torrent_idx: Option<usize>,
@@ -42,7 +42,7 @@ pub struct SuggestedAction {
     pub confidence: Option<f32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProposedAction {
     pub kind: String,
     #[serde(default)]
