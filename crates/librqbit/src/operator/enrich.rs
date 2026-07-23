@@ -46,13 +46,13 @@ impl MaxmindEnricher {
 
 impl PeerEnricher for MaxmindEnricher {
     fn enrich(&self, ip: IpAddr) -> PeerEnrichment {
-        match self.reader.lookup::<geoip2::Asn>(ip) {
-            Ok(asn) => PeerEnrichment {
+        // Not-found / decode errors just mean "no data for this IP".
+        match self.reader.lookup(ip).map(|r| r.decode::<geoip2::Asn>()) {
+            Ok(Ok(Some(asn))) => PeerEnrichment {
                 asn: asn.autonomous_system_number,
                 org: asn.autonomous_system_organization.map(|s| s.to_string()),
             },
-            // Not-found / decode errors just mean "no data for this IP".
-            Err(_) => PeerEnrichment::default(),
+            _ => PeerEnrichment::default(),
         }
     }
 }
