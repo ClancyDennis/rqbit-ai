@@ -1,12 +1,21 @@
-[![crates.io](https://img.shields.io/crates/v/rqbit.svg)](https://crates.io/crates/rqbit)
-[![crates.io](https://img.shields.io/crates/v/librqbit.svg)](https://crates.io/crates/librqbit)
-[![docs.rs](https://img.shields.io/docsrs/librqbit.svg)](https://docs.rs/librqbit/latest/librqbit/)
+# rqbit-ai
 
-# rqbit - bittorrent client in Rust
+An AI-augmented, security-hardened fork of [**rqbit**](https://github.com/ikatson/rqbit) — a
+BitTorrent client in Rust with an HTTP API, Web UI, and a [Tauri](https://tauri.app/) desktop app.
 
-**rqbit** is a bittorrent client written in Rust. Has HTTP API and Web UI, and can be used as a library.
+## What this fork adds
 
-Also has a desktop app built with [Tauri](https://tauri.app/).
+- **AI operator** — an optional, in-process supervisory loop that reads client state (~once a
+  minute) and takes safe, human-gated actions to improve performance, security, and reliability.
+  Works with any OpenAI-compatible endpoint, including a local Ollama model (keeps peer/torrent data
+  on-device). See [AI operator](#ai-operator-experimental).
+- **Security hardening** — constant-time HTTP Basic Auth, bounded tracker/UPnP/SOAP/torrent-URL
+  responses, private-torrent tracker isolation, a tightened Tauri CSP, and a supply-chain CI gate
+  (cargo-audit / cargo-deny) with pinned toolchains. See [`SECURITY.md`](SECURITY.md) and
+  [`docs/security/`](docs/security).
+
+Everything else is upstream rqbit functionality. This fork is not published to crates.io / Homebrew /
+Docker — [build from source](#build) to get the features above. Full credit to the original project.
 
 ## Usage quick start
 
@@ -185,33 +194,24 @@ I've got a report that rqbit can saturate a 20Gbps link, although I don't have t
 
 ## Installation
 
-There are pre-built binaries in [Releases](https://github.com/ikatson/rqbit/releases).
+> **This fork is not packaged.** The published artifacts below are the **original
+> upstream rqbit** and do **not** include this fork's AI operator or security
+> hardening. To use this fork, [build from source](#build).
 
-[![](https://repology.org/badge/vertical-allrepos/rqbit.svg)](https://repology.org/project/rqbit/versions)
+Upstream rqbit (original project) is available as:
 
-### Homebrew
-
-**rqbit** can be installed using Homebrew.
-```sh
-brew install rqbit
-```
-
-### Cargo
-
-If you have the Rust toolchain installed then you can use the following.
-```sh
-cargo install rqbit
-```
-
-## Docker
-
-Docker images are published at [ikatson/rqbit](https://hub.docker.com/r/ikatson/rqbit)
+- Pre-built binaries — upstream [Releases](https://github.com/ikatson/rqbit/releases)
+- Homebrew — `brew install rqbit`
+- Cargo — `cargo install rqbit`
+- Docker — [ikatson/rqbit](https://hub.docker.com/r/ikatson/rqbit)
 
 ## Build
 
-Just a regular Rust binary build process.
+A regular Rust build. To include the Web UI and the AI operator (requires `npm` for the Web UI):
 
-    cargo build --release
+    cargo build --release --features "webui,operator"
+
+Plain `cargo build --release` also works but omits the Web UI and operator.
 
 The "webui" feature requires npm installed.
 
@@ -362,13 +362,17 @@ Supported query parameters, all optional:
 
 ## Motivation
 
-This project began purely out of my enjoyment of writing code in Rust. I wasn’t satisfied with my regular BitTorrent client and wanted to see how much effort it would take to build one from scratch. Starting with the bencode protocol, then the peer protocol, it gradually evolved into what it is today.
+BitTorrent is great: fast, distributed, and it works with basically anything. It's also a privacy nightmare, a security crapshoot, and pretty brittle — leaky peer and tracker traffic, weak defaults, and torrents that quietly stall or misbehave.
 
-## Donations and sponsorship
+So, in the post-ChatGPT era, how do you fix that? With AI. The operator watches the client the way an attentive human would and pursues three goals: improve **security**, improve **reliability**, and improve **performance** — while never touching the data plane (piece selection, choking, and the rate limiter stay deterministic).
 
-If you love rqbit, please consider donating through one of these methods. With enough support, I might be able to make this my full-time job one day — which would be amazing!
+rqbit was the clear starting point: fast, open source, and written in Rust. The [original project](https://github.com/ikatson/rqbit) began as the upstream author's, from the bencode protocol on up; this fork adds the AI operator and the security hardening.
 
-- [Github Sponsors](https://github.com/sponsors/ikatson)
+## Supporting the original project
+
+This fork stands entirely on [ikatson/rqbit](https://github.com/ikatson/rqbit). If you find rqbit useful, please support the original author:
+
+- [GitHub Sponsors](https://github.com/sponsors/ikatson)
 - Crypto
   - ETH (Ethereum) 0x68c54b26b5372d5f091b6c08cc62883686c63527
   - XMR (Monero) 49LcgFreJuedrP8FgnUVB8GkAyoPX7A9PjWfKZA1hNYz5vPCEcYQ9HzKr3pccGR6Lc3V3hn52bukwZShLDhZsk57V41c2ea
