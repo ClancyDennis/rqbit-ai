@@ -1,9 +1,11 @@
 import { useContext, useEffect, useState } from "react";
 import { APIContext } from "../../context";
 import {
+  OperatorAssessment,
   OperatorConfig,
   OperatorConfirmation,
   OperatorDecision,
+  OperatorEvaluation,
   OperatorTier,
 } from "../../api-types";
 import { customSetInterval } from "../../helper/customSetInterval";
@@ -110,6 +112,27 @@ const DecisionRow: React.FC<{ decision: OperatorDecision }> = ({
   </div>
 );
 
+const AssessmentRow: React.FC<{ assessment: OperatorAssessment }> = ({
+  assessment,
+}) => (
+  <div className="rounded border border-divider bg-surface p-2 dark:bg-slate-800">
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-secondary">
+        torrent {torrentLabel(assessment.torrent_idx)}
+      </span>
+      {assessment.concern && (
+        <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+          {assessment.concern}
+        </span>
+      )}
+    </div>
+    <p className="mt-1 text-sm text-secondary">{assessment.summary}</p>
+  </div>
+);
+
+const formatPerTorrent = (n: number): string =>
+  Number.isFinite(n) ? n.toFixed(1) : "0.0";
+
 export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
   const API = useContext(APIContext);
 
@@ -124,6 +147,16 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
   const [running, setRunning] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveNote, setSaveNote] = useState<string | null>(null);
+
+  // "Evaluate now" testing/diagnostics state.
+  const [evaluating, setEvaluating] = useState<boolean>(false);
+  const [evaluation, setEvaluation] = useState<OperatorEvaluation | null>(null);
+  const [evalError, setEvalError] = useState<string | null>(null);
+
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const [showSnapshot, setShowSnapshot] = useState<boolean>(false);
+  const [snapshotLoading, setSnapshotLoading] = useState<boolean>(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -216,6 +249,39 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
       console.error(e);
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleEvaluate = async () => {
+    setEvaluating(true);
+    setEvalError(null);
+    try {
+      const r = await API.operatorEvaluate();
+      setEvaluation(r);
+    } catch (e: any) {
+      setEvalError(e?.text ? String(e.text) : "Evaluation failed");
+      console.error(e);
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
+  const handleToggleSnapshot = async () => {
+    if (showSnapshot) {
+      setShowSnapshot(false);
+      return;
+    }
+    setShowSnapshot(true);
+    setSnapshotLoading(true);
+    setSnapshotError(null);
+    try {
+      const r = await API.getOperatorSnapshot();
+      setSnapshot(JSON.stringify(r, null, 2));
+    } catch (e: any) {
+      setSnapshotError(e?.text ? String(e.text) : "Failed to load snapshot");
+      console.error(e);
+    } finally {
+      setSnapshotLoading(false);
     }
   };
 
@@ -360,6 +426,126 @@ export const OperatorModal: React.FC<Props> = ({ show, onClose }) => {
               </div>
             </form>
           )}
+
+          <div className="mt-5 rounded border border-divider bg-surface p-3 dark:bg-slate-800">
+            <div className="mb-1 flex items-center gap-2">
+              <h4 className="text-base font-semibold">Evaluate (test)</h4>
+              <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                diagnostics
+              </span>
+            </div>
+            <p className="mb-3 text-sm text-secondary">
+              Run one decision against the configured model on the current state
+              to A/B different models and estimate token cost. Nothing is
+              executed.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={evaluating}
+                onClick={handleEvaluate}
+              >
+                {evaluating ? "Evaluating…" : "Evaluate now"}
+              </Button>
+              {evaluating && <Spinner />}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={snapshotLoading}
+                onClick={handleToggleSnapshot}
+              >
+                {showSnapshot ? "Hide snapshot" : "View snapshot"}
+              </Button>
+            </div>
+
+            {evalError && (
+              <div className="mt-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+                {evalError}
+              </div>
+            )}
+
+            {evaluation && !evaluating && (
+              <div className="mt-3 flex flex-col gap-3">
+                <div className="rounded border border-divider bg-white p-3 dark:bg-slate-900">
+                  <div className="mb-1 text-sm font-semibold">Token usage</div>
+                  {evaluation.usage === null ? (
+                    <p className="text-sm text-secondary">
+                      usage not reported by endpoint
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                      <span className="text-2xl font-bold">
+                        {evaluation.usage.total_tokens}
+                        <span className="ml-1 text-sm font-normal text-secondary">
+                          total tokens
+                        </span>
+                      </span>
+                      <span className="text-sm text-secondary">
+                        {formatPerTorrent(evaluation.tokens_per_torrent)} tokens
+                        / torrent ({evaluation.torrents} torrents)
+                      </span>
+                      <span className="text-sm text-secondary">
+                        prompt {evaluation.usage.prompt_tokens} · completion{" "}
+                        {evaluation.usage.completion_tokens}
+                      </span>
+                    </div>
+                  )}
+                  {evaluation.usage === null && (
+                    <p className="mt-1 text-sm text-secondary">
+                      {formatPerTorrent(evaluation.tokens_per_torrent)} tokens /
+                      torrent ({evaluation.torrents} torrents)
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-1 text-sm font-semibold">
+                    Assessments ({evaluation.assessments.length}) · decisions (
+                    {evaluation.decisions.length})
+                  </div>
+                  {evaluation.assessments.length === 0 ? (
+                    <p className="text-sm text-secondary">
+                      No assessments returned.
+                    </p>
+                  ) : (
+                    <div className="flex max-h-60 flex-col gap-2 overflow-y-auto pr-1">
+                      {evaluation.assessments.map((a, i) => (
+                        <AssessmentRow key={i} assessment={a} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-1 text-sm font-semibold">Raw response</div>
+                  <pre className="max-h-64 overflow-auto rounded border border-divider bg-slate-50 p-2 font-mono text-xs text-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                    {evaluation.raw_response}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {showSnapshot && (
+              <div className="mt-3">
+                <div className="mb-1 text-sm font-semibold">
+                  State snapshot (fed to model)
+                </div>
+                {snapshotLoading ? (
+                  <Spinner label="Loading" />
+                ) : snapshotError ? (
+                  <div className="rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+                    {snapshotError}
+                  </div>
+                ) : (
+                  <pre className="max-h-64 overflow-auto rounded border border-divider bg-slate-50 p-2 font-mono text-xs text-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                    {snapshot}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
         </section>
       </ModalBody>
       <ModalFooter>
